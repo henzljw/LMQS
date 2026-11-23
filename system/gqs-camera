@@ -1,0 +1,32 @@
+#!/bin/bash
+# GNOME Quick Settings — camera privacy helper (runs as root through pkexec).
+#   gqs-camera off     unload the webcam driver and block it from loading (survives reboot)
+#   gqs-camera on      remove the block and load the driver again
+#   gqs-camera status  print "on" or "off"
+set -u
+CONF=/etc/modprobe.d/gqs-camera-off.conf
+DRIVER=uvcvideo
+
+case "${1:-}" in
+    off)
+        printf '# Written by GNOME Quick Settings (Camera toggle). Delete this file to re-enable the camera.\nblacklist %s\ninstall %s /bin/false\n' "$DRIVER" "$DRIVER" > "$CONF"
+        if [ -d "/sys/module/$DRIVER" ]; then
+            if ! modprobe -r "$DRIVER" 2>/dev/null; then
+                rm -f "$CONF"
+                echo "camera is in use" >&2
+                exit 2
+            fi
+        fi
+        ;;
+    on)
+        rm -f "$CONF"
+        modprobe "$DRIVER" 2>/dev/null || true
+        ;;
+    status)
+        if [ -f "$CONF" ]; then echo off; else echo on; fi
+        ;;
+    *)
+        echo "usage: gqs-camera on|off|status" >&2
+        exit 1
+        ;;
+esac

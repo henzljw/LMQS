@@ -1,0 +1,3 @@
+#!/bin/bash
+# Turns the camera ON. Allowed without a password for the signed-in user.
+exec /usr/local/libexec/gqs-camera on

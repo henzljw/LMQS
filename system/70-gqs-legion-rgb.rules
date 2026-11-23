@@ -1,0 +1,3 @@
+# GNOME Quick Settings: let the person signed in at the computer change the
+# Lenovo Legion 4-zone RGB keyboard lighting (ITE 8295 controller) without a password.
+KERNEL=="hidraw*", ATTRS{idVendor}=="048d", ATTRS{idProduct}=="c935|c955|c963|c965|c973|c975|c983|c984|c985|c993|c994|c995", TAG+="uaccess"

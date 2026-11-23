@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Lenovo Legion 4-zone RGB keyboard (ITE 8295 controller) for LMQS.
+
+    gqs-legion-rgb detect
+        prints "ok" (found and writable), "noperm" (found, needs the udev rule) or "none"
+    gqs-legion-rgb state
+        prints the controller's current lighting as hex (report 0xCC), or "nostate"
+    gqs-legion-rgb watch
+        keeps running: prints "state <hex>" whenever the lighting changes (e.g. Fn+Space),
+        "event <hex>" for any report the controller sends, and "nostate" if it can't be read
+    gqs-legion-rgb set EFFECT SPEED BRIGHTNESS COLOR1 COLOR2 COLOR3 COLOR4
+        EFFECT: static | breath | wave-ltr | wave-rtl | smooth | off
+        SPEED: 1-4, BRIGHTNESS: 1 (low) or 2 (high), COLORn: RRGGBB (left to right)
+
+Sends the same 33-byte HID feature report Lenovo Vantage uses (report 0xCC, command 0x16).
+"""
+import fcntl
+import glob
+import os
+import select
+import sys
+
+VENDOR = 0x048D
+PRODUCTS = {0xC935, 0xC955, 0xC963, 0xC965, 0xC973, 0xC975, 0xC983, 0xC984, 0xC985, 0xC993, 0xC994, 0xC995}
+VENDOR_PAGE = b"\x06\x89\xff"  # HID usage page 0xFF89: the lighting interface
+EFFECTS = {"static": 1, "breath": 3, "wave-ltr": 4, "wave-rtl": 4, "smooth": 6, "off": 1}
+
+
+def hidiocsfeature(length):
+    return (3 << 30) | (length << 16) | (ord("H") << 8) | 0x06
+
+
+def hidiocgfeature(length):
+    return (3 << 30) | (length << 16) | (ord("H") << 8) | 0x07
+
+
+def candidates():
+    found = []
+    for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        try:
+            with open(os.path.join(path, "device", "uevent")) as f:
+                hid_id = next((l[7:] for l in f.read().splitlines() if l.startswith("HID_ID=")), "")
+            _, vid, pid = hid_id.split(":")
+            if int(vid, 16) != VENDOR or int(pid, 16) not in PRODUCTS:
+                continue
+        except (OSError, ValueError, StopIteration):
+            continue
+        try:
+            with open(os.path.join(path, "device", "report_descriptor"), "rb") as f:
+                lighting = VENDOR_PAGE in f.read()
+        except OSError:
+            lighting = False
+        found.append((0 if lighting else 1, "/dev/" + os.path.basename(path)))
+    return [dev for _, dev in sorted(found)]
+
+
+def detect():
+    devs = candidates()
+    if not devs:
+        return "none"
+    for dev in devs:
+        if os.access(dev, os.R_OK | os.W_OK):
+            return "ok"
+    return "noperm"
+
+
+def build(effect, speed, brightness, colors):
+    p = [0] * 33
+    p[0], p[1] = 0xCC, 0x16
+    p[2] = EFFECTS[effect]
+    p[3] = max(1, min(4, speed))
+    p[4] = max(1, min(2, brightness))
+    if effect == "off":
+        colors = ["000000"] * 4
+    for i, c in enumerate((colors + ["000000"] * 4)[:4]):
+        v = int(c.lstrip("#"), 16)
+        p[5 + i * 3:8 + i * 3] = [(v >> 16) & 255, (v >> 8) & 255, v & 255]
+    if effect.startswith("wave"):
+        p[18] = 1 if effect == "wave-rtl" else 0
+        p[19] = 0 if effect == "wave-rtl" else 1
+    return bytearray(p)
+
+
+def send(payload):
+    result = "none"
+    for dev in candidates():
+        try:
+            fd = os.open(dev, os.O_RDWR)
+        except PermissionError:
+            result = "noperm"
+            continue
+        except OSError:
+            continue
+        try:
+            fcntl.ioctl(fd, hidiocsfeature(len(payload)), payload)
+            return "ok"
+        except OSError:
+            result = "fail"
+        finally:
+            os.close(fd)
+    return result
+
+
+def read_state():
+    """Ask the controller for report 0xCC. Returns the bytes, or None if it can't be read."""
+    for dev in candidates():
+        try:
+            fd = os.open(dev, os.O_RDWR)
+        except OSError:
+            continue
+        try:
+            buf = bytearray(33)
+            buf[0] = 0xCC
+            fcntl.ioctl(fd, hidiocgfeature(len(buf)), buf)
+            if buf[1] == 0x16:
+                return bytes(buf)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+    return None
+
+
+def watch():
+    fds = []
+    for dev in candidates():
+        try:
+            fds.append(os.open(dev, os.O_RDONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    last, said_nostate = None, False
+
+    def check():
+        nonlocal last, said_nostate
+        st = read_state()
+        if st is None:
+            if not said_nostate:
+                print("nostate", flush=True)
+                said_nostate = True
+            return
+        h = st[:20].hex()
+        if h != last:
+            last = h
+            print("state", h, flush=True)
+
+    check()
+    while True:
+        if os.getppid() == 1:          # Quick Settings went away
+            return
+        ready = select.select(fds, [], [], 2.0)[0] if fds else (select.select([], [], [], 2.0) and [])
+        for fd in ready:
+            try:
+                data = os.read(fd, 64)
+            except OSError:
+                continue
+            if data:
+                print("event", data.hex(), flush=True)
+        check()
+
+
+def main(argv):
+    if len(argv) >= 2 and argv[1] == "state":
+        st = read_state()
+        print(st.hex() if st else "nostate")
+        return 0
+    if len(argv) >= 2 and argv[1] == "watch":
+        try:
+            watch()
+        except (BrokenPipeError, KeyboardInterrupt):
+            pass
+        return 0
+    if len(argv) >= 2 and argv[1] == "detect":
+        print(detect())
+        return 0
+    if len(argv) >= 9 and argv[1] == "set":
+        effect = argv[2]
+        if effect not in EFFECTS:
+            print("bad effect", file=sys.stderr)
+            return 1
+        res = send(build(effect, int(argv[3]), int(argv[4]), argv[5:9]))
+        print(res)
+        return 0 if res == "ok" else 2
+    print(__doc__.strip(), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

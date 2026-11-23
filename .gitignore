@@ -1,0 +1,35 @@
+# --- Build output ---
+# Release zips are built from the repo and attached to GitHub Releases, not committed.
+dist/
+*.zip
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+
+# --- Backups and temporary files ---
+*.bak
+*.gqs-tmp
+*.gqs-stray.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+.#*
+
+# --- Editors and IDEs ---
+.vscode/
+.idea/
+*.code-workspace
+.project
+.settings/
+
+# --- OS clutter ---
+.directory
+.Trash-*/
+.DS_Store
+Thumbs.db
+
+# --- Local test settings (never commit your own Cinnamon settings) ---
+*.local.json

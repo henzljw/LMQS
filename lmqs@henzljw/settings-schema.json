@@ -1,0 +1,640 @@
+{
+    "layout": {
+        "type": "layout",
+        "pages": [
+            "page-toggles",
+            "page-custom",
+            "page-layout",
+            "page-panel",
+            "page-appearance"
+        ],
+        "page-layout": {
+            "type": "page",
+            "title": "Layout",
+            "sections": [
+                "sec-sliders",
+                "sec-top",
+                "sec-extras"
+            ]
+        },
+        "page-toggles": {
+            "type": "page",
+            "title": "Tiles",
+            "sections": [
+                "sec-toggles"
+            ]
+        },
+        "page-custom": {
+            "type": "page",
+            "title": "Custom Tiles",
+            "sections": [
+                "sec-custom"
+            ]
+        },
+        "sec-custom": {
+            "type": "section",
+            "title": "Your tiles",
+            "keys": [
+                "custom-tiles-help",
+                "custom-tiles"
+            ]
+        },
+        "sec-toggles": {
+            "type": "section",
+            "title": "Toggles",
+            "keys": [
+                "toggles-help",
+                "toggle-layout"
+            ]
+        },
+        "sec-sliders": {
+            "type": "section",
+            "title": "Sliders",
+            "keys": [
+                "slider-volume",
+                "scroll-volume-slider",
+                "output-picker",
+                "slider-brightness",
+                "scroll-brightness-slider",
+                "mic-slider",
+                "scroll-mic-slider",
+                "input-picker"
+            ]
+        },
+        "sec-top": {
+            "type": "section",
+            "title": "Top row",
+            "keys": [
+                "show-battery-pill",
+                "show-screenshot",
+                "show-customize",
+                "show-configure",
+                "show-settings",
+                "show-lock",
+                "show-power"
+            ]
+        },
+        "sec-extras": {
+            "type": "section",
+            "title": "Extras",
+            "keys": [
+                "show-media-card",
+                "show-notifications",
+                "notifications-position",
+                "notif-compact",
+                "refresh-rate-remember",
+                "bt-at-login"
+            ]
+        },
+        "page-panel": {
+            "type": "page",
+            "title": "Panel",
+            "sections": [
+                "sec-panel-icons",
+                "sec-panel-network",
+                "sec-panel-battery",
+                "sec-panel-behaviour"
+            ]
+        },
+        "sec-panel-icons": {
+            "type": "section",
+            "title": "Panel icons",
+            "keys": [
+                "panel-network",
+                "panel-volume",
+                "panel-battery",
+                "panel-bluetooth",
+                "panel-nightlight",
+                "panel-airplane",
+                "panel-dnd",
+                "panel-caffeine",
+                "panel-mic",
+                "panel-camera"
+            ]
+        },
+        "sec-panel-network": {
+            "type": "section",
+            "title": "Network",
+            "keys": [
+                "panel-net-speed",
+                "panel-net-speed-show"
+            ]
+        },
+        "sec-panel-behaviour": {
+            "type": "section",
+            "title": "Behaviour",
+            "keys": [
+                "panel-scroll-volume",
+                "panel-scroll-touchpad"
+            ]
+        },
+        "page-appearance": {
+            "type": "page",
+            "title": "Appearance",
+            "sections": [
+                "sec-look"
+            ]
+        },
+        "sec-look": {
+            "type": "section",
+            "title": "Look",
+            "keys": [
+                "card-style",
+                "style-system-wide",
+                "accent-color",
+                "columns",
+                "rows-per-page",
+                "keep-page-height",
+                "animation-speed"
+            ]
+        },
+        "sec-panel-battery": {
+            "type": "section",
+            "title": "Battery",
+            "keys": [
+                "panel-battery-style",
+                "panel-battery-percent-mode",
+                "panel-battery-time"
+            ]
+        }
+    },
+    "toggles-help": {
+        "type": "label",
+        "description": "Turn a tile's switch on to show it in Quick Settings, and use the arrows to change the order (pages fill automatically, in this order). You can also do this in Quick Settings with the pencil button: drag tiles to reorder them, to another page, or into the hidden tiles. Tiles your computer can't use yet (no Ethernet port, app not installed...) show dimmed."
+    },
+    "toggle-layout": {
+        "type": "list",
+        "description": "Toggles",
+        "columns": [
+            {
+                "id": "item",
+                "title": "Toggle",
+                "type": "string"
+            },
+            {
+                "id": "show",
+                "title": "Show",
+                "type": "boolean"
+            }
+        ],
+        "default": [
+            {
+                "item": "Wi-Fi",
+                "show": true
+            },
+            {
+                "item": "Bluetooth",
+                "show": true
+            },
+            {
+                "item": "Power Mode",
+                "show": true
+            },
+            {
+                "item": "Night Light",
+                "show": true
+            },
+            {
+                "item": "Dark Style",
+                "show": true
+            },
+            {
+                "item": "Do Not Disturb",
+                "show": true
+            },
+            {
+                "item": "Wired",
+                "show": false
+            },
+            {
+                "item": "VPN",
+                "show": false
+            },
+            {
+                "item": "Caffeine",
+                "show": false
+            },
+            {
+                "item": "Keyboard",
+                "show": false
+            },
+            {
+                "item": "Refresh Rate",
+                "show": false
+            },
+            {
+                "item": "Microphone",
+                "show": false
+            },
+            {
+                "item": "Camera",
+                "show": false
+            },
+            {
+                "item": "Auto Rotate",
+                "show": false
+            },
+            {
+                "item": "Hotspot",
+                "show": false
+            },
+            {
+                "item": "Touchpad",
+                "show": false
+            },
+            {
+                "item": "Airplane Mode",
+                "show": false
+            },
+            {
+                "item": "Screenshot",
+                "show": false
+            },
+            {
+                "item": "Terminal",
+                "show": false
+            },
+            {
+                "item": "Update Manager",
+                "show": false
+            },
+            {
+                "item": "NVIDIA Settings",
+                "show": false
+            },
+            {
+                "item": "Discord",
+                "show": false
+            }
+        ]
+    },
+    "slider-volume": {
+        "type": "switch",
+        "default": true,
+        "description": "Volume slider"
+    },
+    "scroll-volume-slider": {
+        "type": "combobox",
+        "default": "both",
+        "description": "Volume slider scrolling",
+        "options": {
+            "Mouse wheel and touchpad": "both",
+            "Mouse wheel only": "wheel",
+            "Touchpad only": "touchpad",
+            "Off": "off"
+        },
+        "dependency": "slider-volume",
+        "tooltip": "What can change this slider by scrolling over it. When scrolling is off for a device, it scrolls Quick Settings instead."
+    },
+    "output-picker": {
+        "type": "switch",
+        "default": true,
+        "description": "Sound output picker (arrow on the volume slider)"
+    },
+    "slider-brightness": {
+        "type": "switch",
+        "default": true,
+        "description": "Brightness slider"
+    },
+    "scroll-brightness-slider": {
+        "type": "combobox",
+        "default": "both",
+        "description": "Brightness slider scrolling",
+        "options": {
+            "Mouse wheel and touchpad": "both",
+            "Mouse wheel only": "wheel",
+            "Touchpad only": "touchpad",
+            "Off": "off"
+        },
+        "dependency": "slider-brightness",
+        "tooltip": "What can change this slider by scrolling over it. When scrolling is off for a device, it scrolls Quick Settings instead."
+    },
+    "mic-slider": {
+        "type": "combobox",
+        "default": "recording",
+        "description": "Microphone slider",
+        "options": {
+            "When an app is using the microphone": "recording",
+            "Always": "always",
+            "Never": "never"
+        }
+    },
+    "scroll-mic-slider": {
+        "type": "combobox",
+        "default": "both",
+        "description": "Microphone slider scrolling",
+        "options": {
+            "Mouse wheel and touchpad": "both",
+            "Mouse wheel only": "wheel",
+            "Touchpad only": "touchpad",
+            "Off": "off"
+        },
+        "tooltip": "What can change this slider by scrolling over it. When scrolling is off for a device, it scrolls Quick Settings instead."
+    },
+    "input-picker": {
+        "type": "switch",
+        "default": true,
+        "description": "Microphone input picker (arrow on the microphone slider)"
+    },
+    "show-battery-pill": {
+        "type": "switch",
+        "default": true,
+        "description": "Battery"
+    },
+    "show-screenshot": {
+        "type": "switch",
+        "default": true,
+        "description": "Screenshot button"
+    },
+    "show-settings": {
+        "type": "switch",
+        "default": true,
+        "description": "Settings button"
+    },
+    "show-lock": {
+        "type": "switch",
+        "default": true,
+        "description": "Lock button"
+    },
+    "show-power": {
+        "type": "switch",
+        "default": true,
+        "description": "Power button"
+    },
+    "show-media-card": {
+        "type": "switch",
+        "default": true,
+        "description": "Media player controls when something is playing"
+    },
+    "panel-network": {
+        "type": "switch",
+        "default": true,
+        "description": "Network"
+    },
+    "panel-net-speed": {
+        "type": "switch",
+        "default": false,
+        "description": "Show download and upload speed",
+        "tooltip": "Shows the current network speed next to the Wi-Fi or wired icon, updated every second (for example \u2193 1.2 MB/s \u2191 34 KB/s). Hidden when you're offline and on vertical panels."
+    },
+    "panel-net-speed-show": {
+        "type": "combobox",
+        "default": "both",
+        "description": "Speeds to show",
+        "dependency": "panel-net-speed",
+        "options": {
+            "Download and upload": "both",
+            "Download only": "down",
+            "Upload only": "up"
+        }
+    },
+    "panel-volume": {
+        "type": "switch",
+        "default": true,
+        "description": "Volume"
+    },
+    "panel-battery": {
+        "type": "switch",
+        "default": true,
+        "description": "Battery"
+    },
+    "panel-bluetooth": {
+        "type": "switch",
+        "default": true,
+        "description": "Bluetooth (when a device is connected)"
+    },
+    "panel-nightlight": {
+        "type": "switch",
+        "default": true,
+        "description": "Night Light (when on)"
+    },
+    "panel-airplane": {
+        "type": "switch",
+        "default": true,
+        "description": "Airplane Mode (when on)"
+    },
+    "panel-dnd": {
+        "type": "switch",
+        "default": true,
+        "description": "Do Not Disturb (when on)"
+    },
+    "panel-caffeine": {
+        "type": "switch",
+        "default": true,
+        "description": "Caffeine (when on)"
+    },
+    "panel-mic": {
+        "type": "switch",
+        "default": true,
+        "description": "Microphone (when an app is using it)"
+    },
+    "panel-scroll-volume": {
+        "type": "switch",
+        "default": true,
+        "description": "Scroll over the panel icons to change the volume (mouse wheel)",
+        "tooltip": "Each mouse-wheel notch over the Quick Settings panel button changes the volume by 5%. Touchpad scrolling has its own option."
+    },
+    "panel-scroll-touchpad": {
+        "type": "switch",
+        "default": true,
+        "description": "Scroll over the panel icons to change the volume (touchpad, two fingers)",
+        "tooltip": "Two-finger scrolling on a touchpad over the Quick Settings panel button changes the volume. Works on its own or together with the mouse wheel option."
+    },
+    "card-style": {
+        "type": "combobox",
+        "default": "dark",
+        "description": "Menu style",
+        "options": {
+            "Dark (GNOME default)": "dark",
+            "Light": "light",
+            "Follow system style": "system"
+        },
+        "tooltip": "Follow system style matches your system theme: Quick Settings turns light or dark whenever your theme does (including from the Dark Style tile)."
+    },
+    "style-system-wide": {
+        "type": "switch",
+        "default": false,
+        "description": "Apply the menu style to the whole system",
+        "tooltip": "Choosing Dark or Light also switches your apps, windows and Cinnamon theme to their dark or light versions (like the Dark Style tile), and the Dark Style tile changes the menu style too. Has no effect with Follow system style."
+    },
+    "accent-color": {
+        "type": "colorchooser",
+        "default": "rgb(53,132,228)",
+        "description": "Accent color"
+    },
+    "columns": {
+        "type": "combobox",
+        "default": 2,
+        "description": "Toggle columns",
+        "options": {
+            "1 column": 1,
+            "2 columns (GNOME default)": 2,
+            "3 columns": 3,
+            "4 columns": 4,
+            "5 columns": 5
+        }
+    },
+    "show-customize": {
+        "type": "switch",
+        "default": true,
+        "description": "Edit button (pencil): drag tiles to rearrange them"
+    },
+    "panel-camera": {
+        "type": "switch",
+        "default": true,
+        "description": "Camera (when blocked)"
+    },
+    "panel-battery-style": {
+        "type": "combobox",
+        "default": "system",
+        "description": "Battery icon",
+        "options": {
+            "System icon (from your theme)": "system",
+            "Horizontal": "horizontal",
+            "Vertical": "vertical",
+            "Circle": "circle"
+        }
+    },
+    "panel-battery-percent-mode": {
+        "type": "combobox",
+        "default": "off",
+        "description": "Battery percentage",
+        "options": {
+            "Hidden": "off",
+            "Beside the icon": "outside",
+            "Inside the icon": "inside"
+        },
+        "tooltip": "Inside the icon is only available with the Horizontal, Vertical and Circle icons; the System icon can show the percentage beside it.",
+        "gqs-hide-options": {
+            "key": "panel-battery-style",
+            "equals": "system",
+            "hide": [
+                "inside"
+            ],
+            "fallback": "outside"
+        }
+    },
+    "panel-battery-time": {
+        "type": "combobox",
+        "default": "off",
+        "description": "Battery time remaining",
+        "options": {
+            "Disabled": "off",
+            "On the Quick Settings button (panel)": "panel",
+            "Inside Quick Settings": "menu",
+            "Both inside and outside Quick Settings": "both"
+        },
+        "tooltip": "Time left in hours and minutes (for example 3 h 25 min), or the time until full while charging. Inside Quick Settings it shows under the percentage in the battery pill. Hidden while it's still being estimated; the panel text is also hidden on vertical panels."
+    },
+    "animation-speed": {
+        "type": "combobox",
+        "default": "normal",
+        "description": "Animations",
+        "options": {
+            "Off": "off",
+            "Fast": "fast",
+            "Normal (GNOME)": "normal",
+            "Slow": "slow"
+        }
+    },
+    "refresh-rate-remember": {
+        "type": "switch",
+        "default": true,
+        "description": "Keep the refresh rate chosen in Quick Settings after restarting"
+    },
+    "refresh-rate-memory": {
+        "type": "generic",
+        "default": {}
+    },
+    "refresh-rate-verified": {
+        "type": "generic",
+        "default": {}
+    },
+    "kbd-rgb-state": {
+        "type": "generic",
+        "default": {}
+    },
+    "show-notifications": {
+        "type": "switch",
+        "default": true,
+        "description": "Notifications at the bottom (tap the header to expand; tiles shrink to 6 round buttons)"
+    },
+    "notifications-expanded": {
+        "type": "generic",
+        "default": false
+    },
+    "notifications-position": {
+        "type": "combobox",
+        "default": "bottom",
+        "description": "Show notifications",
+        "options": {
+            "Below Quick Settings": "bottom",
+            "Above Quick Settings": "top",
+            "Left of Quick Settings": "left",
+            "Right of Quick Settings": "right"
+        },
+        "dependency": "show-notifications"
+    },
+    "notif-compact": {
+        "type": "switch",
+        "default": true,
+        "dependency": "show-notifications",
+        "description": "Compact Quick Settings while notifications are open",
+        "tooltip": "On: opening the notification list shrinks the tiles into a row of round buttons and hides the sliders, to make room. Off: Quick Settings stays full size and the list opens below it (scroll if the screen is short). Not used when notifications are on the left or right."
+    },
+    "media-expanded": {
+        "type": "generic",
+        "default": false
+    },
+    "rows-per-page": {
+        "type": "combobox",
+        "default": 4,
+        "description": "Tile rows per page (the rest go to the next page)",
+        "options": {
+            "1 row": 1,
+            "2 rows": 2,
+            "3 rows": 3,
+            "4 rows (default)": 4,
+            "5 rows": 5,
+            "6 rows": 6
+        }
+    },
+    "show-configure": {
+        "type": "switch",
+        "default": true,
+        "description": "Quick Settings settings button (opens this window)"
+    },
+    "keep-page-height": {
+        "type": "switch",
+        "default": true,
+        "description": "Keep every page the same height (a page with fewer tiles keeps empty space)"
+    },
+    "bt-at-login": {
+        "type": "combobox",
+        "default": "remember",
+        "description": "Bluetooth at login",
+        "options": {
+            "Remember last state": "remember",
+            "Always off": "off",
+            "Always on": "on",
+            "Leave to the system": "system"
+        },
+        "tooltip": "Linux turns Bluetooth on at every boot, and Bluetooth Manager (Blueman) may switch it on too. Quick Settings applies your choice for the first minute after login, after waking from suspend and whenever the adapter reappears. 'Always off' also stops Blueman powering it on. To stop it at boot entirely, re-run install.sh with --bt-boot-off."
+    },
+    "bt-last-powered": {
+        "type": "generic",
+        "default": null
+    },
+    "custom-tiles-help": {
+        "type": "label",
+        "description": "Make your own tiles: open an app, open a folder or website, or run your own on/off commands. They appear in Quick Settings like the built-in tiles, so you can move or hide them with the pencil button."
+    },
+    "custom-tiles": {
+        "type": "generic",
+        "default": []
+    },
+    "custom-tiles-state": {
+        "type": "generic",
+        "default": {}
+    }
+}

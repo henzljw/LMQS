@@ -1,0 +1,1210 @@
+#!/usr/bin/env python3
+"""LMQS (Linux Mint Quick Settings) — settings window (GTK 3).
+
+Built from the applet's settings-schema.json, so every option appears automatically.
+Reads and writes Cinnamon's own settings file for the applet; Cinnamon notices the
+change and the applet updates live. GNOME (libadwaita-like) look.
+
+    gqs-settings --uuid UUID --instance ID --path APPLET_DIR [--page NAME]
+
+Author: Henry henz - https://henzljw.vercel.app/
+"""
+import argparse
+import colorsys
+import json
+import os
+import re
+import sys
+import time
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+
+APP_ID = "com.henzljw.GqsSettings"
+PAGE_ICONS = {
+    "page-toggles": "view-app-grid-symbolic",
+    "page-custom": "list-add-symbolic",
+    "page-layout": "view-grid-symbolic",
+    "page-panel": "video-display-symbolic",
+    "page-appearance": "applications-graphics-symbolic",
+}
+PAGE_HINTS = {
+    "page-toggles": "Show, hide and order the tiles",
+    "page-custom": "Your own tiles for apps, folders, websites and commands",
+    "page-layout": "Sliders, top row buttons and extras",
+    "page-panel": "Panel icons, network speed, battery and scrolling",
+    "page-appearance": "Menu style, accent colour, columns and animations",
+}
+TILE_INFO = {
+    "Wi-Fi": "Turns Wi-Fi on or off. The arrow lists networks to connect to.",
+    "Wired": "Connects or disconnects Ethernet. Dimmed when there's no Ethernet port.",
+    "Bluetooth": "Turns Bluetooth on or off. The arrow lists your paired devices to connect.",
+    "VPN": "Connects your VPN. The arrow picks which one. Set VPNs up in Network settings.",
+    "Power Mode": "Switches Performance, Balanced and Power Saver.",
+    "Night Light": "Warmer screen colours to ease eye strain in the evening.",
+    "Dark Style": "Switches apps and the system between light and dark themes.",
+    "Do Not Disturb": "Hides notification pop-ups. They still collect in the list.",
+    "Caffeine": "Keeps the laptop awake: no screen blanking, locking or idle sleep until you turn it off.",
+    "Keyboard": "Keyboard backlight on/off. The arrow sets the brightness or lighting.",
+    "Refresh Rate": "Switches the screen's refresh rate (e.g. 60 Hz to save power). Asks you to confirm.",
+    "Microphone": "Mutes or unmutes your microphone.",
+    "Camera": "Blocks or allows the webcam for privacy.",
+    "Auto Rotate": "Lets the screen rotate with the device. Needs a rotation sensor.",
+    "Hotspot": "Shares your connection over Wi-Fi so other devices can join.",
+    "Touchpad": "Turns the touchpad on or off. Asks first, and checks a mouse is connected.",
+    "Airplane Mode": "Turns off all wireless: Wi-Fi, Bluetooth and mobile.",
+    "Screenshot": "Takes a screenshot. The arrow picks screen, window or area.",
+    "Terminal": "Opens your default terminal.",
+    "Update Manager": "Opens Update Manager and shows how many updates are waiting.",
+    "NVIDIA Settings": "Opens NVIDIA Settings and shows the current graphics mode.",
+    "Discord": "Opens Discord, or brings it to the front if it's already open.",
+}
+COPYRIGHT = "Copyright \u00a9 2026 Henry henz"
+LICENSE_TEXT = "All rights reserved."
+
+SWATCHES = [
+    ("Blue", "#3584e4"), ("Teal", "#2190a4"), ("Green", "#3a944a"), ("Yellow", "#c88800"),
+    ("Orange", "#ed5b00"), ("Red", "#e62d42"), ("Pink", "#d56199"), ("Purple", "#9141ac"), ("Slate", "#6f8396"),
+]
+
+
+# ---------------------------------------------------------------- colours
+
+def parse_color(text):
+    text = str(text or "")
+    m = re.search(r"rgba?\(([^)]+)\)", text)
+    if m:
+        parts = [float(x) for x in m.group(1).split(",")[:3]]
+        return tuple(int(round(v)) for v in parts)
+    m = re.match(r"#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})", text, re.I)
+    if m:
+        return tuple(int(g, 16) for g in m.groups())
+    return (53, 132, 228)
+
+
+def hexc(rgb):
+    return "#%02x%02x%02x" % rgb
+
+
+# ---------------------------------------------------------------- settings file
+
+class Store:
+    """Cinnamon's per-instance settings JSON: {key: {type, default, value, ...}}."""
+
+    def __init__(self, uuid, instance, schema, path=None):
+        self.schema = schema
+        self.path = path if path and os.path.exists(path) else self._find(uuid, instance)
+        self._adopt_stray(uuid, instance)
+        self.data = {}
+        self.muted_until = 0
+        self.load()
+
+    BASES = [os.path.expanduser("~/.config/cinnamon/spices"), os.path.expanduser("~/.cinnamon/configs")]
+
+    @classmethod
+    def _find(cls, uuid, instance):
+        bases = cls.BASES
+        # Single-instance applets (like this one) use "<uuid>.json"; others use "<instance>.json".
+        for base in bases:
+            for name in ("%s.json" % uuid, "%s.json" % instance):
+                p = os.path.join(base, uuid, name)
+                if os.path.exists(p):
+                    return p
+        for base in bases:
+            d = os.path.join(base, uuid)
+            if os.path.isdir(d):
+                files = sorted(f for f in os.listdir(d) if re.match(r"^\d+\.json$", f))
+                if files:
+                    return os.path.join(d, files[0])
+        return os.path.join(bases[0], uuid, "%s.json" % instance)
+
+    def _adopt_stray(self, uuid, instance):
+        """Version 3.0 could save into "<instance>.json" by mistake; move those changes over."""
+        stray = os.path.join(os.path.dirname(self.path), "%s.json" % instance)
+        if stray == self.path or not os.path.exists(stray) or not os.path.exists(self.path):
+            return
+        try:
+            with open(stray) as f:
+                changes = json.load(f)
+            with open(self.path) as f:
+                real = json.load(f)
+            if os.path.getmtime(stray) > os.path.getmtime(self.path):
+                for key, entry in changes.items():
+                    if isinstance(entry, dict) and "value" in entry and key in self.schema:
+                        real.setdefault(key, dict(self.schema[key]))["value"] = entry["value"]
+                with open(self.path, "w") as f:
+                    json.dump(real, f, indent=4)
+            os.replace(stray, stray + ".gqs-stray.bak")
+        except (OSError, ValueError):
+            pass
+
+    def load(self):
+        try:
+            with open(self.path) as f:
+                self.data = json.load(f)
+        except (OSError, ValueError):
+            self.data = {}
+
+    def get(self, key):
+        entry = self.data.get(key)
+        if isinstance(entry, dict) and "value" in entry:
+            return entry["value"]
+        return self.schema.get(key, {}).get("default")
+
+    def set(self, key, value):
+        self.load()   # pick up anything the applet wrote meanwhile
+        entry = self.data.get(key)
+        if not isinstance(entry, dict):
+            entry = dict(self.schema.get(key, {}))
+            self.data[key] = entry
+        entry["value"] = value
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.muted_until = time.monotonic() + 0.8
+        with open(self.path, "w") as f:
+            json.dump(self.data, f, indent=4)
+
+    def set_many(self, values):
+        """Write several keys in one save, so Quick Settings applies them in one go."""
+        self.load()
+        for key, value in values.items():
+            entry = self.data.get(key)
+            if not isinstance(entry, dict):
+                entry = dict(self.schema.get(key, {}))
+                self.data[key] = entry
+            entry["value"] = value
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.muted_until = time.monotonic() + 0.8
+        with open(self.path, "w") as f:   # same way as set(), which Quick Settings watches
+            json.dump(self.data, f, indent=4)
+
+
+# ---------------------------------------------------------------- styles
+
+def accent_css(accent):
+    """Everything that shows an "on" or main action uses Quick Settings' accent colour:
+    switches, the main buttons, selections, focus rings, links and the version pill."""
+    r, g, b = parse_color(accent)
+    fg = "#ffffff" if (0.299 * r + 0.587 * g + 0.114 * b) < 160 else "#000000"
+    c = "rgb(%d,%d,%d)" % (r, g, b)
+    return """
+@define-color gqs_accent %(c)s;
+@define-color gqs_accent_fg %(fg)s;
+
+/* switches: drawn completely here (rounded track, round knob), because some themes such as
+   Mint-Y draw them with pictures, and recolouring those left a square track. */
+switch {
+    background-image: none; background-color: alpha(@theme_fg_color, 0.2);
+    border: none; border-radius: 999px; box-shadow: none; outline-offset: -2px;
+    padding: 2px; min-height: 22px; color: transparent;
+}
+switch:hover { background-color: alpha(@theme_fg_color, 0.28); }
+switch slider {
+    background-image: none; background-color: #ffffff;
+    border: none; border-radius: 999px; box-shadow: 0 1px 2px alpha(black, 0.3);
+    min-width: 22px; min-height: 22px; margin: 0; outline: none;
+}
+switch image, switch label { color: transparent; opacity: 0; }
+switch:checked { background-color: @gqs_accent; }
+switch:checked:hover { background-color: shade(@gqs_accent, 1.08); }
+switch:backdrop { background-color: alpha(@theme_fg_color, 0.15); }
+switch:checked:backdrop { background-color: alpha(@gqs_accent, 0.8); }
+switch:disabled { opacity: 0.5; }
+
+/* main action buttons (Add, Save, Yes, Add Tile...) */
+button.suggested-action { background-color: @gqs_accent; background-image: none; border-color: shade(@gqs_accent, 0.85); color: @gqs_accent_fg; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none; }
+button.suggested-action label, button.suggested-action image { color: @gqs_accent_fg; }
+button.suggested-action:hover { background-color: shade(@gqs_accent, 1.08); background-image: none; }
+button.suggested-action:active { background-color: shade(@gqs_accent, 0.92); background-image: none; }
+button.suggested-action:disabled { background-color: alpha(@gqs_accent, 0.4); }
+
+/* check boxes and radio buttons */
+check:checked, radio:checked { background-color: @gqs_accent; background-image: none; border-color: shade(@gqs_accent, 0.85); color: @gqs_accent_fg; }
+
+/* selected rows, text selection, focus and links */
+list row:selected, row:selected, treeview:selected { background-color: @gqs_accent; color: @gqs_accent_fg; }
+list row:selected label, row:selected label { color: @gqs_accent_fg; }
+selection, entry selection, label selection { background-color: @gqs_accent; color: @gqs_accent_fg; }
+entry:focus, spinbutton:focus, combobox button:focus { border-color: @gqs_accent; box-shadow: inset 0 0 0 1px @gqs_accent; }
+scale highlight, progressbar progress { background-color: @gqs_accent; background-image: none; border-color: @gqs_accent; }
+*:link, button.link label, .link { color: @gqs_accent; }
+
+/* pages */
+.version-pill { background-color: alpha(@gqs_accent, 0.16); color: @gqs_accent; }
+.nav-row:focus .nav-title { color: @gqs_accent; }
+""" % {"c": c, "fg": fg}
+
+
+def gnome_css():
+    # Follows your GTK theme's own colours, laid out like libadwaita preference pages.
+    return """
+.hero-icon { margin-top: 8px; }
+.hero-title { font-size: 20pt; font-weight: 800; }
+.hero-sub { opacity: 0.75; }
+.version-pill { border-radius: 999px; padding: 4px 14px; font-weight: bold; }
+.boxed { background-color: @theme_base_color; border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); }
+.boxed separator { background-color: alpha(currentColor, 0.1); min-height: 1px; margin: 0; }
+.nav-row { background: none; border: none; box-shadow: none; border-radius: 0; padding: 12px 16px; }
+.nav-row:hover { background-color: alpha(currentColor, 0.05); }
+.nav-row.first { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.nav-row.last { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+.nav-title { font-weight: normal; }
+.nav-hint { opacity: 0.65; font-size: 9.5pt; }
+.info-row { padding: 12px 16px; }
+.info-key { opacity: 0.7; }
+.legal-text { padding: 14px 16px; }
+.page-title { font-size: 17pt; font-weight: bold; }
+.card { background-color: @theme_base_color; border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); padding: 4px 0; }
+.card-title { font-weight: bold; margin: 8px 12px 4px 12px; }
+.row { padding: 10px 14px; min-height: 36px; }
+.row-hint, .help { opacity: 0.7; font-size: 9.5pt; }
+button.tonal { border-radius: 6px; padding: 4px 10px; }
+button.icon { border-radius: 999px; min-width: 30px; min-height: 30px; padding: 0; }
+button.swatch { min-width: 26px; min-height: 26px; padding: 0; border-radius: 999px; border: 2px solid transparent; background-image: none; box-shadow: none; }
+button.swatch.selected { border: 3px solid @theme_fg_color; }
+.tile-row { border-radius: 8px; padding: 2px 6px 2px 12px; background-color: alpha(currentColor, 0.04); }
+.tile-row.hidden-tile .row-label { opacity: 0.55; }
+"""
+
+
+# ---------------------------------------------------------------- window
+
+class SettingsWindow(Gtk.ApplicationWindow):
+    def __init__(self, app, store, schema, start_page):
+        super().__init__(application=app, title="LMQS")
+        self.store, self.schema = store, schema
+        self.layout = schema.get("layout", {})
+        self.css = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.set_default_size(780, 860)
+        self.set_icon_name("preferences-system")
+        self.deps = []        # (widget, key it depends on)
+        self.refreshers = {}  # key -> function to re-read the value into the widget
+        self.option_deps = []  # (key, combobox key whose choices depend on it)
+        self._building = False
+
+        self.app_path = getattr(app.args, "path", "") if hasattr(app, "args") else ""
+        self.meta = {}
+        try:
+            with open(os.path.join(self.app_path, "metadata.json")) as f:
+                self.meta = json.load(f)
+        except (OSError, ValueError):
+            pass
+
+        # Header: back button on inner pages, Reset on settings pages.
+        self.header = Gtk.HeaderBar(show_close_button=True)
+        self.header.set_title("LMQS")
+        self.header.set_subtitle("Changes show live in Quick Settings")
+        self.back_btn = Gtk.Button.new_from_icon_name("go-previous-symbolic", Gtk.IconSize.BUTTON)
+        self.back_btn.set_tooltip_text("Back")
+        self.back_btn.get_style_context().add_class("flat")
+        self.back_btn.set_valign(Gtk.Align.CENTER)
+        self.back_btn.connect("clicked", lambda *_: self._back())
+        # Title area: [<] Title, side by side and centred, with the subtitle under the title.
+        title_box = Gtk.Box(spacing=6)
+        title_box.set_halign(Gtk.Align.CENTER)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        texts.set_valign(Gtk.Align.CENTER)
+        self.title_label = Gtk.Label(label="LMQS")
+        self.title_label.get_style_context().add_class("title")
+        self.subtitle_label = Gtk.Label(label="")
+        self.subtitle_label.get_style_context().add_class("subtitle")
+        texts.pack_start(self.title_label, False, False, 0)
+        texts.pack_start(self.subtitle_label, False, False, 0)
+        title_box.pack_start(self.back_btn, False, False, 0)
+        title_box.pack_start(texts, False, False, 0)
+        self.header.set_custom_title(title_box)
+        self.reset_btn = Gtk.Button()
+        rbox = Gtk.Box(spacing=6)
+        rbox.pack_start(Gtk.Image.new_from_icon_name("edit-undo-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+        rbox.pack_start(Gtk.Label(label="Reset"), False, False, 0)
+        self.reset_btn.add(rbox)
+        self.reset_btn.set_tooltip_text("Reset settings to their defaults")
+        self.reset_btn.connect("clicked", lambda *_: self._confirm_reset())
+        self.header.pack_end(self.reset_btn)
+        # Their visibility is managed per page, so the window's show_all() mustn't override it.
+        rbox.show_all()
+        self.back_btn.get_child().show() if self.back_btn.get_child() else None
+        for b in (self.back_btn, self.reset_btn):
+            b.set_no_show_all(True)
+        self.set_titlebar(self.header)
+        self.current_page = None
+        self.history = []
+        self.titles = {}
+
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT, transition_duration=220)
+        self.stack.get_style_context().add_class("gqs-bg")
+        self.add(self.stack)
+
+        # Home: app header + a list of pages, like GNOME's About/preferences windows.
+        self._add_page("home", "LMQS", self._build_home())
+        for page in self.layout.get("pages", []):
+            self._build_page(page)
+        self._add_page("about", "About", self._build_about())
+        self._add_page("about-details", "Details", self._build_details())
+        self._add_page("about-credits", "Credits", self._build_credits())
+        self._add_page("about-legal", "Legal", self._build_legal())
+
+        self._show("home", animate=False)
+        if start_page and start_page != "home" and self.stack.get_child_by_name(start_page):
+            self._go(start_page, animate=False)
+        self.apply_style()
+        self._update_deps()
+
+        mon = Gio.File.new_for_path(store.path)
+        try:
+            self.monitor = mon.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            self.monitor.connect("changed", self._on_file_changed)
+        except GLib.Error:
+            self.monitor = None
+
+    # ---- look
+    def apply_style(self):
+        card = self.store.get("card-style")
+        settings = Gtk.Settings.get_default()
+        if card == "system":
+            theme = (settings.get_property("gtk-theme-name") or "").lower()
+            dark = "dark" in theme
+        else:
+            dark = card != "light"
+        settings.set_property("gtk-application-prefer-dark-theme", dark)
+        try:
+            self.css.load_from_data((gnome_css() + accent_css(self.store.get("accent-color"))).encode())
+        except GLib.Error:
+            self.css.load_from_data(gnome_css().encode())
+
+    # ---- navigation
+    def _clamp(self, width=620):
+        clamp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18, margin=28)
+        clamp.set_halign(Gtk.Align.CENTER)
+        clamp.set_size_request(width, -1)
+        return clamp
+
+    def _add_page(self, name, title, content):
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(content)
+        scroller.show_all()   # a hidden page can't be made the visible one
+        self.stack.add_named(scroller, name)
+        self.titles[name] = title
+
+    def _build_page(self, page):
+        info = self.layout.get(page, {})
+        clamp = self._clamp()
+        for section in info.get("sections", []):
+            clamp.pack_start(self._build_section(section), False, False, 0)
+        self._add_page(page, info.get("title", page), clamp)
+
+    def _show(self, name, animate=True, back=False):
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT if back else Gtk.StackTransitionType.SLIDE_LEFT)
+        self.stack.set_transition_duration(220 if animate else 0)
+        self.stack.set_visible_child_name(name)
+        self.current_page = name
+        home = name == "home"
+        self.title_label.set_text("LMQS" if home else self.titles.get(name, ""))
+        sub = "Changes show live in Quick Settings" if (home or name.startswith("page-")) else ""
+        self.subtitle_label.set_text(sub)
+        self.subtitle_label.set_visible(bool(sub))
+        self.subtitle_label.set_no_show_all(True)
+        self.back_btn.set_visible(not home)
+        self.reset_btn.set_visible(home or name.startswith("page-"))
+
+    def _go(self, name, animate=True):
+        if name == self.current_page:
+            return
+        self.history.append(self.current_page)
+        self._show(name, animate)
+
+    def _back(self):
+        if self.history:
+            self._show(self.history.pop() or "home", back=True)
+
+    def _select(self, page):     # kept for older callers
+        if self.stack.get_child_by_name(page):
+            self._go(page)
+
+    # ---- building blocks
+    def _hero(self, title, subtitle=None):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        img = Gtk.Image.new_from_icon_name("preferences-system", Gtk.IconSize.DIALOG)
+        img.set_pixel_size(112)
+        img.get_style_context().add_class("hero-icon")
+        box.pack_start(img, False, False, 0)
+        t = Gtk.Label(label=title)
+        t.get_style_context().add_class("hero-title")
+        box.pack_start(t, False, False, 0)
+        a = Gtk.Label(label=self.meta.get("author", "Henry henz"))
+        a.get_style_context().add_class("hero-sub")
+        box.pack_start(a, False, False, 0)
+        pill = Gtk.Label(label=self.meta.get("version", "") or "-")
+        pill.get_style_context().add_class("version-pill")
+        pill.set_halign(Gtk.Align.CENTER)
+        box.pack_start(pill, False, False, 2)
+        if subtitle:
+            st = Gtk.Label(label=subtitle, wrap=True, justify=Gtk.Justification.CENTER)
+            st.get_style_context().add_class("hero-sub")
+            box.pack_start(st, False, False, 0)
+        return box
+
+    def _boxed(self, rows):
+        """Rounded list of rows with thin lines between them."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.get_style_context().add_class("boxed")
+        for i, row in enumerate(rows):
+            if i:
+                card.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0)
+            ctx = row.get_style_context()
+            if i == 0:
+                ctx.add_class("first")
+            if i == len(rows) - 1:
+                ctx.add_class("last")
+            card.pack_start(row, False, False, 0)
+        return card
+
+    def _nav_row(self, title, target, icon=None, hint=None):
+        btn = Gtk.Button()
+        btn.get_style_context().add_class("nav-row")
+        box = Gtk.Box(spacing=14)
+        if icon:
+            box.pack_start(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR), False, False, 0)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        labels.set_valign(Gtk.Align.CENTER)
+        t = Gtk.Label(label=title, xalign=0)
+        t.get_style_context().add_class("nav-title")
+        labels.pack_start(t, False, False, 0)
+        if hint:
+            h = Gtk.Label(label=hint, xalign=0)
+            h.set_ellipsize(Pango.EllipsizeMode.END)
+            h.get_style_context().add_class("nav-hint")
+            labels.pack_start(h, False, False, 0)
+        box.pack_start(labels, True, True, 0)
+        box.pack_end(Gtk.Image.new_from_icon_name("go-next-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+        btn.add(box)
+        btn.connect("clicked", lambda *_: self._go(target))
+        return btn
+
+    def _info_row(self, key, value, link=None):
+        row = Gtk.Box(spacing=16)
+        row.get_style_context().add_class("info-row")
+        k = Gtk.Label(label=key, xalign=0)
+        k.get_style_context().add_class("info-key")
+        row.pack_start(k, False, False, 0)
+        if link:
+            v = Gtk.LinkButton.new_with_label(link, value)
+            v.set_halign(Gtk.Align.END)
+        else:
+            v = Gtk.Label(label=value, xalign=1, wrap=True, selectable=True)
+            v.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            v.set_max_width_chars(48)
+        row.pack_end(v, False, False, 0)
+        return row
+
+    def _text_block(self, text):
+        lab = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True)
+        lab.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        lab.get_style_context().add_class("legal-text")
+        return lab
+
+    # ---- home and about pages
+    def _build_home(self):
+        clamp = self._clamp()
+        clamp.pack_start(self._hero(self.meta.get("name") or "LMQS",
+                                    "Linux Mint Quick Settings. Changes show up live in the preview."), False, False, 0)
+        rows = [self._nav_row(self.layout.get(p, {}).get("title", p), p, PAGE_ICONS.get(p), PAGE_HINTS.get(p))
+                for p in self.layout.get("pages", [])]
+        clamp.pack_start(self._boxed(rows), False, False, 0)
+        clamp.pack_start(self._boxed([self._nav_row("About", "about", "help-about-symbolic",
+                                                    "Version, credits and legal")]), False, False, 0)
+        return clamp
+
+    def _build_about(self):
+        clamp = self._clamp(480)
+        clamp.pack_start(self._hero("About LMQS"), False, False, 0)
+        clamp.pack_start(self._boxed([self._nav_row("Details", "about-details")]), False, False, 0)
+        clamp.pack_start(self._boxed([self._nav_row("Credits", "about-credits"),
+                                      self._nav_row("Legal", "about-legal")]), False, False, 0)
+        return clamp
+
+    def _build_details(self):
+        m = self.meta
+        clamp = self._clamp(560)
+        desc = self._text_block(m.get("description", ""))
+        clamp.pack_start(self._boxed([desc]), False, False, 0)
+        rows = [
+            self._info_row("Version", m.get("version", "-")),
+            self._info_row("Developer", m.get("author", "Henry henz")),
+        ]
+        if m.get("website"):
+            rows.append(self._info_row("Website", m["website"].replace("https://", "").rstrip("/"), m["website"]))
+        rows += [
+            self._info_row("Applet ID", m.get("uuid", "-")),
+            self._info_row("Works with", "Cinnamon %s" % (" \u2013 ".join(sorted({v[0], v[-1]})) if (v := m.get("cinnamon-version")) else "-")),
+            self._info_row("Settings file", self.store.path),
+        ]
+        clamp.pack_start(self._boxed(rows), False, False, 0)
+        return clamp
+
+    def _build_credits(self):
+        clamp = self._clamp(560)
+        clamp.pack_start(self._boxed([
+            self._info_row("Created by", self.meta.get("author", "Henry henz")),
+        ]), False, False, 0)
+        clamp.pack_start(self._boxed([
+            self._info_row("Design", "Based on GNOME Shell\u2019s Quick Settings"),
+            self._info_row("Runs on", "Cinnamon (GJS, St, Clutter)"),
+            self._info_row("Settings window", "GTK 3 and PyGObject"),
+            self._info_row("Icons", "Your icon theme"),
+        ]), False, False, 0)
+        return clamp
+
+    def _build_legal(self):
+        clamp = self._clamp(560)
+        clamp.pack_start(self._boxed([self._text_block("%s\n\n%s" % (COPYRIGHT, LICENSE_TEXT))]), False, False, 0)
+        clamp.pack_start(self._boxed([self._text_block(
+            "GNOME is a trademark of the GNOME Foundation. Linux Mint and Cinnamon are projects of the "
+            "Linux Mint team. Lenovo and Legion are trademarks of Lenovo. This applet is an independent "
+            "project and isn\u2019t affiliated with or endorsed by any of them.")]), False, False, 0)
+        return clamp
+
+    # ---- sections and rows
+    def _build_section(self, section):
+        info = self.layout.get(section, {})
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        title = Gtk.Label(label=info.get("title", ""), xalign=0)
+        title.get_style_context().add_class("card-title")
+        outer.pack_start(title, False, False, 0)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.get_style_context().add_class("card")
+        for key in info.get("keys", []):
+            row = self._build_row(key)
+            if row:
+                card.pack_start(row, False, False, 0)
+        outer.pack_start(card, False, False, 0)
+        return outer
+
+    def _row(self, text, widget, hint=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        row.get_style_context().add_class("row")
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        lab = Gtk.Label(label=text, xalign=0, wrap=True)
+        lab.get_style_context().add_class("row-label")
+        labels.pack_start(lab, False, False, 0)
+        if hint:
+            h = Gtk.Label(label=hint, xalign=0, wrap=True)
+            h.get_style_context().add_class("row-hint")
+            labels.pack_start(h, False, False, 0)
+        row.pack_start(labels, True, True, 0)
+        widget.set_valign(Gtk.Align.CENTER)
+        row.pack_end(widget, False, False, 0)
+        return row
+
+    def _build_row(self, key):
+        spec = self.schema.get(key, {})
+        kind = spec.get("type")
+        desc = spec.get("description", key)
+        row = None
+        if kind == "generic" and key == "custom-tiles":
+            return self._build_custom_tiles(key)
+        if kind == "label":
+            row = Gtk.Label(label=desc, xalign=0, wrap=True)
+            row.get_style_context().add_class("help")
+            row.set_margin_start(16); row.set_margin_end(16); row.set_margin_top(8); row.set_margin_bottom(4)
+            return row
+        if kind == "switch":
+            sw = Gtk.Switch()
+            def refresh(sw=sw):
+                self._building = True
+                sw.set_active(bool(self.store.get(key)))
+                self._building = False
+            refresh()
+            sw.connect("notify::active", lambda w, *_: self._set(key, w.get_active()))
+            self.refreshers[key] = refresh
+            row = self._row(desc, sw, spec.get("tooltip"))
+        elif kind == "combobox":
+            combo = Gtk.ComboBoxText()
+            all_options = list(spec.get("options", {}).items())
+            options = list(all_options)
+            hide = spec.get("gqs-hide-options")   # some choices only make sense with another setting
+            def refresh(combo=combo, key=key, hide=hide, all_options=all_options):
+                self._building = True
+                shown = all_options
+                if hide and self.store.get(hide["key"]) == hide["equals"]:
+                    shown = [(l, v) for (l, v) in all_options if v not in hide["hide"]]
+                    if self.store.get(key) in hide["hide"]:
+                        self.store.set(key, hide["fallback"])
+                options[:] = shown
+                combo.remove_all()
+                for label, _value in shown:
+                    combo.append_text(label)
+                cur = self.store.get(key)
+                if key == "panel-battery-time" and isinstance(cur, bool):
+                    cur = "panel" if cur else "off"   # was an on/off switch in 3.4.0
+                idx = next((i for i, (_l, v) in enumerate(options) if str(v) == str(cur)), 0)
+                combo.set_active(idx)
+                self._building = False
+            refresh()
+            combo.connect("changed", lambda w, options=options: self._set(key, options[w.get_active()][1]) if w.get_active() >= 0 else None)
+            if hide:
+                self.option_deps.append((hide["key"], key))
+            self.refreshers[key] = refresh
+            row = self._row(desc, combo, spec.get("tooltip"))
+        elif kind == "colorchooser":
+            row = self._build_color_row(key, desc)
+        elif kind == "list":
+            row = self._build_tile_list(key)
+        if row is not None and spec.get("dependency"):
+            self.deps.append((row, spec["dependency"]))
+        return row
+
+    def _build_color_row(self, key, desc):
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons = []
+        for name, hx in SWATCHES:
+            b = Gtk.Button(tooltip_text=name)
+            b.get_style_context().add_class("swatch")
+            prov = Gtk.CssProvider()
+            prov.load_from_data(("button.swatch { background-color: %s; }" % hx).encode())
+            b.get_style_context().add_provider(prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+            rgb = parse_color(hx)
+            b.connect("clicked", lambda _b, rgb=rgb: self._set(key, "rgb(%d,%d,%d)" % rgb))
+            buttons.append((b, rgb))
+            box.pack_start(b, False, False, 0)
+        picker = Gtk.ColorButton(title="Accent colour")
+        picker.set_use_alpha(False)
+        def picked(w):
+            c = w.get_rgba()
+            self._set(key, "rgb(%d,%d,%d)" % (round(c.red * 255), round(c.green * 255), round(c.blue * 255)))
+        picker.connect("color-set", picked)
+        box.pack_start(picker, False, False, 4)
+        def refresh():
+            cur = parse_color(self.store.get(key))
+            rgba = Gdk.RGBA(); rgba.parse(hexc(cur))
+            picker.set_rgba(rgba)
+            for b, rgb in buttons:
+                ctx = b.get_style_context()
+                (ctx.add_class if rgb == cur else ctx.remove_class)("selected")
+        refresh()
+        self.refreshers[key] = refresh
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.get_style_context().add_class("row")
+        lab = Gtk.Label(label=desc, xalign=0)
+        lab.get_style_context().add_class("row-label")
+        outer.pack_start(lab, False, False, 0)
+        outer.pack_start(box, False, False, 0)
+        return outer
+
+    def _build_tile_list(self, key):
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=10)
+
+        def refresh():
+            for child in holder.get_children():
+                holder.remove(child)
+            rows = [dict(r) for r in (self.store.get(key) or []) if isinstance(r, dict)]
+            for i, r in enumerate(rows):
+                line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                line.get_style_context().add_class("tile-row")
+                if not r.get("show", True):
+                    line.get_style_context().add_class("hidden-tile")
+                texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+                texts.set_valign(Gtk.Align.CENTER)
+                name = Gtk.Label(label=self._tile_label(r.get("item", "?")), xalign=0)
+                name.get_style_context().add_class("row-label")
+                texts.pack_start(name, False, False, 0)
+                about = self._tile_about(r.get("item", ""))
+                if about:
+                    hint = Gtk.Label(label=about, xalign=0, wrap=True)
+                    hint.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                    hint.set_max_width_chars(60)
+                    hint.get_style_context().add_class("row-hint")
+                    texts.pack_start(hint, False, False, 0)
+                line.pack_start(texts, True, True, 0)
+                up = Gtk.Button.new_from_icon_name("go-up-symbolic", Gtk.IconSize.BUTTON)
+                down = Gtk.Button.new_from_icon_name("go-down-symbolic", Gtk.IconSize.BUTTON)
+                for b, tip in ((up, "Move up"), (down, "Move down")):
+                    b.get_style_context().add_class("icon")
+                    b.set_tooltip_text(tip)
+                up.set_sensitive(i > 0)
+                down.set_sensitive(i < len(rows) - 1)
+                up.connect("clicked", lambda _b, i=i: self._move_tile(key, i, -1))
+                down.connect("clicked", lambda _b, i=i: self._move_tile(key, i, 1))
+                sw = Gtk.Switch(active=r.get("show", True), valign=Gtk.Align.CENTER)
+                sw.set_tooltip_text("Show this tile")
+                sw.connect("notify::active", lambda w, _p, i=i: self._show_tile(key, i, w.get_active()))
+                line.pack_end(sw, False, False, 0)
+                line.pack_end(down, False, False, 0)
+                line.pack_end(up, False, False, 0)
+                holder.pack_start(line, False, False, 0)
+            holder.show_all()
+
+        refresh()
+        self.refreshers[key] = refresh
+        return holder
+
+    def _tile_about(self, item):
+        """One line on what a tile does (custom tiles: what they open or run)."""
+        if str(item).startswith("custom:"):
+            for t in self.store.get("custom-tiles") or []:
+                if isinstance(t, dict) and "custom:" + str(t.get("id")) == item:
+                    return self._custom_summary(t)
+            return ""
+        return TILE_INFO.get(item, "")
+
+    def _tile_label(self, item):
+        if str(item).startswith("custom:"):
+            for t in self.store.get("custom-tiles") or []:
+                if isinstance(t, dict) and "custom:" + str(t.get("id")) == item:
+                    return "%s  (custom)" % (t.get("name") or "Custom tile")
+            return "Custom tile"
+        return item
+
+    # ---- custom tiles
+    KIND_TEXT = {"app": "Opens an app", "open": "Opens a folder or website", "command": "Runs commands (on/off)"}
+
+    def _build_custom_tiles(self, key):
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=10)
+
+        def refresh():
+            for child in holder.get_children():
+                holder.remove(child)
+            add = Gtk.Button()
+            ab = Gtk.Box(spacing=6)
+            ab.pack_start(Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+            ab.pack_start(Gtk.Label(label="Add Tile…"), False, False, 0)
+            add.add(ab)
+            add.get_style_context().add_class("suggested-action")
+            add.set_halign(Gtk.Align.START)
+            add.set_margin_bottom(6)
+            add.connect("clicked", lambda *_: self._edit_custom(key, None))
+            holder.pack_start(add, False, False, 0)
+            tiles = [t for t in (self.store.get(key) or []) if isinstance(t, dict)]
+            if not tiles:
+                empty = Gtk.Label(label="No custom tiles yet. Add one to open an app, a folder or website, or to run your own on/off commands.",
+                                  xalign=0, wrap=True)
+                empty.get_style_context().add_class("row-hint")
+                holder.pack_start(empty, False, False, 4)
+            for t in tiles:
+                line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                line.get_style_context().add_class("tile-row")
+                line.pack_start(self._icon_image(t.get("icon"), 24), False, False, 0)
+                labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                n = Gtk.Label(label=t.get("name") or "Custom tile", xalign=0)
+                n.get_style_context().add_class("row-label")
+                h = Gtk.Label(label=self._custom_summary(t), xalign=0)
+                h.set_ellipsize(Pango.EllipsizeMode.END)
+                h.get_style_context().add_class("row-hint")
+                labels.pack_start(n, False, False, 0)
+                labels.pack_start(h, False, False, 0)
+                line.pack_start(labels, True, True, 0)
+                edit = Gtk.Button.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.BUTTON)
+                edit.set_tooltip_text("Edit")
+                delete = Gtk.Button.new_from_icon_name("user-trash-symbolic", Gtk.IconSize.BUTTON)
+                delete.set_tooltip_text("Remove")
+                for b in (edit, delete):
+                    b.get_style_context().add_class("icon")
+                    b.set_valign(Gtk.Align.CENTER)
+                edit.connect("clicked", lambda _b, t=t: self._edit_custom(key, t))
+                delete.connect("clicked", lambda _b, t=t: self._delete_custom(key, t))
+                line.pack_end(delete, False, False, 0)
+                line.pack_end(edit, False, False, 0)
+                holder.pack_start(line, False, False, 0)
+            holder.show_all()
+
+        refresh()
+        self.refreshers[key] = refresh
+        return holder
+
+    def _custom_summary(self, t):
+        kind = t.get("kind")
+        if kind == "app":
+            info = self._app_info(t.get("app"))
+            return "Opens %s" % (info.get_display_name() if info else (t.get("app") or "an app") + " (not found)")
+        if kind == "open":
+            return "Opens %s" % (t.get("target") or "nothing yet")
+        return "On: %s" % (t.get("on") or "-")
+
+    @staticmethod
+    def _app_info(app_id):
+        if not app_id:
+            return None
+        try:
+            return Gio.DesktopAppInfo.new(app_id)
+        except (TypeError, GLib.Error):
+            return None
+
+    @staticmethod
+    def _set_icon(img, icon, size):
+        """Icon name, image file, or a saved GIcon string (what apps report)."""
+        try:
+            img.set_from_gicon(Gio.Icon.new_for_string(icon or "application-x-executable-symbolic"), Gtk.IconSize.LARGE_TOOLBAR)
+        except (GLib.Error, TypeError):
+            img.set_from_icon_name("application-x-executable-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
+        img.set_pixel_size(size)
+        return img
+
+    @classmethod
+    def _icon_image(cls, icon, size):
+        return cls._set_icon(Gtk.Image(), icon, size)
+
+    def _delete_custom(self, key, tile):
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                buttons=Gtk.ButtonsType.NONE, text='Remove "%s"?' % (tile.get("name") or "Custom tile"))
+        dlg.format_secondary_text("The tile is removed from Quick Settings.")
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        b = dlg.add_button("Remove", Gtk.ResponseType.OK)
+        b.get_style_context().add_class("destructive-action")
+        resp = dlg.run()
+        dlg.destroy()
+        if resp != Gtk.ResponseType.OK:
+            return
+        tiles = [t for t in (self.store.get(key) or []) if isinstance(t, dict) and t.get("id") != tile.get("id")]
+        layout = [r for r in (self.store.get("toggle-layout") or []) if isinstance(r, dict) and r.get("item") != "custom:%s" % tile.get("id")]
+        self._save_custom(key, tiles, layout)
+
+    def _save_custom(self, key, tiles, layout):
+        self.store.set_many({key: tiles, "toggle-layout": layout})
+        for k in (key, "toggle-layout"):
+            if k in self.refreshers:
+                self.refreshers[k]()
+
+    def _edit_custom(self, key, tile):
+        new = tile is None
+        t = dict(tile or {"id": "%x" % int(time.time() * 1000), "kind": "app", "name": "", "icon": ""})
+        dlg = Gtk.Dialog(title="Add Tile" if new else "Edit Tile", transient_for=self, modal=True)
+        dlg.set_default_size(520, 560 if new else 420)
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        ok = dlg.add_button("Add" if new else "Save", Gtk.ResponseType.OK)
+        ok.get_style_context().add_class("suggested-action")
+        box = dlg.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_start(16); box.set_margin_end(16); box.set_margin_top(12); box.set_margin_bottom(12)
+
+        kind = Gtk.ComboBoxText()
+        kinds = [("app", "Open an app"), ("open", "Open a folder or website"), ("command", "Command toggle (advanced)")]
+        for k, label in kinds:
+            kind.append(k, label)
+        kind.set_active_id(t.get("kind", "app"))
+        grid = Gtk.Grid(column_spacing=10, row_spacing=8)
+        box.pack_start(grid, False, False, 0)
+
+        def add_row(r, text, widget):
+            lab = Gtk.Label(label=text, xalign=1)
+            grid.attach(lab, 0, r, 1, 1)
+            widget.set_hexpand(True)
+            grid.attach(widget, 1, r, 1, 1)
+            return lab
+
+        add_row(0, "Kind", kind)
+        name = Gtk.Entry(text=t.get("name", ""), placeholder_text="Shown on the tile")
+        add_row(1, "Name", name)
+        icon_box = Gtk.Box(spacing=6)
+        icon_entry = Gtk.Entry(text=t.get("icon", ""), placeholder_text="Icon name or image file")
+        preview = Gtk.Image()
+        def update_preview(*_):
+            self._set_icon(preview, icon_entry.get_text().strip() or None, 24)
+        icon_entry.connect("changed", update_preview)
+        pick = Gtk.Button(label="Image…")
+        def pick_image(*_):
+            fc = Gtk.FileChooserDialog(title="Choose an icon image", transient_for=dlg, action=Gtk.FileChooserAction.OPEN)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Choose", Gtk.ResponseType.OK)
+            flt = Gtk.FileFilter(); flt.set_name("Images"); flt.add_mime_type("image/*"); fc.add_filter(flt)
+            if fc.run() == Gtk.ResponseType.OK:
+                icon_entry.set_text(fc.get_filename())
+            fc.destroy()
+        pick.connect("clicked", pick_image)
+        icon_box.pack_start(preview, False, False, 0)
+        icon_box.pack_start(icon_entry, True, True, 0)
+        icon_box.pack_start(pick, False, False, 0)
+        add_row(2, "Icon", icon_box)
+        update_preview()
+
+        # --- per kind
+        stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        box.pack_start(stack, True, True, 0)
+
+        # app chooser: searchable list of installed apps
+        app_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        search = Gtk.SearchEntry(placeholder_text="Search apps")
+        app_page.pack_start(search, False, False, 0)
+        sc = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sc.set_min_content_height(220)
+        apps = Gtk.ListBox()
+        apps.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        sc.add(apps)
+        app_page.pack_start(sc, True, True, 0)
+        infos = sorted((a for a in Gio.AppInfo.get_all() if a.should_show() and a.get_id()),
+                       key=lambda a: a.get_display_name().lower())
+        selected = {"id": t.get("app")}
+        for a in infos:
+            row = Gtk.ListBoxRow()
+            row.app = a
+            hb = Gtk.Box(spacing=10, margin=4)
+            img = Gtk.Image()
+            if a.get_icon():
+                img.set_from_gicon(a.get_icon(), Gtk.IconSize.LARGE_TOOLBAR)
+            img.set_pixel_size(24)
+            hb.pack_start(img, False, False, 0)
+            hb.pack_start(Gtk.Label(label=a.get_display_name(), xalign=0), True, True, 0)
+            row.add(hb)
+            apps.add(row)
+            if a.get_id() == t.get("app"):
+                apps.select_row(row)
+        def filt(row):
+            q = search.get_text().strip().lower()
+            return not q or q in row.app.get_display_name().lower() or q in (row.app.get_id() or "").lower()
+        apps.set_filter_func(filt)
+        search.connect("search-changed", lambda *_: apps.invalidate_filter())
+        def on_pick(_lb, row):
+            if not row:
+                return
+            a = row.app
+            # Fill in name and icon from the app unless you typed your own.
+            if not name.get_text().strip() or name.get_text() == selected.get("name"):
+                name.set_text(a.get_display_name())
+            ic = a.get_icon().to_string() if a.get_icon() else ""
+            if not icon_entry.get_text().strip() or icon_entry.get_text() == selected.get("icon"):
+                icon_entry.set_text(ic)
+            selected.update({"id": a.get_id(), "name": a.get_display_name(), "icon": ic})
+        apps.connect("row-selected", on_pick)
+        stack.add_named(app_page, "app")
+
+        # folder / website
+        open_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        target_box = Gtk.Box(spacing=6)
+        target = Gtk.Entry(text=t.get("target", ""), placeholder_text="A folder (~/Downloads) or a website (example.com)")
+        folder_btn = Gtk.Button(label="Folder…")
+        def pick_folder(*_):
+            fc = Gtk.FileChooserDialog(title="Choose a folder", transient_for=dlg, action=Gtk.FileChooserAction.SELECT_FOLDER)
+            fc.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Choose", Gtk.ResponseType.OK)
+            if fc.run() == Gtk.ResponseType.OK:
+                target.set_text(fc.get_filename())
+                if not name.get_text().strip():
+                    name.set_text(os.path.basename(fc.get_filename().rstrip("/")) or fc.get_filename())
+            fc.destroy()
+        folder_btn.connect("clicked", pick_folder)
+        target_box.pack_start(target, True, True, 0)
+        target_box.pack_start(folder_btn, False, False, 0)
+        open_page.pack_start(target_box, False, False, 0)
+        hint = Gtk.Label(label="Folders open in Files; websites open in your browser.", xalign=0, wrap=True)
+        hint.get_style_context().add_class("row-hint")
+        open_page.pack_start(hint, False, False, 0)
+        stack.add_named(open_page, "open")
+
+        # command toggle
+        cmd_page = Gtk.Grid(column_spacing=10, row_spacing=8)
+        on_cmd = Gtk.Entry(text=t.get("on", ""), placeholder_text="e.g. nmcli connection up MyVPN")
+        off_cmd = Gtk.Entry(text=t.get("off", ""), placeholder_text="e.g. nmcli connection down MyVPN")
+        st_cmd = Gtk.Entry(text=t.get("status", ""), placeholder_text="Optional: succeeds when it's on")
+        for r, (label, w) in enumerate((("On command", on_cmd), ("Off command", off_cmd), ("Status command", st_cmd))):
+            cmd_page.attach(Gtk.Label(label=label, xalign=1), 0, r, 1, 1)
+            w.set_hexpand(True)
+            cmd_page.attach(w, 1, r, 1, 1)
+        chint = Gtk.Label(label="Commands run in a shell as you (no password prompts). The status command decides whether "
+                                "the tile shows as on: it's on when the command succeeds (exit code 0). Without one, "
+                                "the tile remembers the last state you set.", xalign=0, wrap=True)
+        chint.get_style_context().add_class("row-hint")
+        cmd_page.attach(chint, 0, 3, 2, 1)
+        stack.add_named(cmd_page, "command")
+
+        def kind_changed(*_):
+            stack.set_visible_child_name(kind.get_active_id())
+            if not icon_entry.get_text().strip():
+                icon_entry.set_text({"open": "folder-symbolic", "command": "system-run-symbolic"}.get(kind.get_active_id(), ""))
+        kind.connect("changed", kind_changed)
+        dlg.show_all()
+        stack.set_visible_child_name(t.get("kind", "app"))
+
+        while True:
+            if dlg.run() != Gtk.ResponseType.OK:
+                dlg.destroy()
+                return
+            k = kind.get_active_id()
+            problem = None
+            if k == "app" and not selected.get("id"):
+                problem = "Choose an app from the list."
+            elif k == "open" and not target.get_text().strip():
+                problem = "Enter a folder or website."
+            elif k == "command" and not (on_cmd.get_text().strip() or off_cmd.get_text().strip()):
+                problem = "Enter at least an On or Off command."
+            elif not name.get_text().strip():
+                problem = "Give the tile a name."
+            if not problem:
+                break
+            err = Gtk.MessageDialog(transient_for=dlg, modal=True, message_type=Gtk.MessageType.WARNING,
+                                    buttons=Gtk.ButtonsType.OK, text=problem)
+            err.run(); err.destroy()
+
+        t.update({"kind": k, "name": name.get_text().strip(), "icon": icon_entry.get_text().strip()})
+        for f in ("app", "target", "on", "off", "status"):
+            t.pop(f, None)
+        if k == "app":
+            t["app"] = selected["id"]
+        elif k == "open":
+            t["target"] = target.get_text().strip()
+        else:
+            t.update({"on": on_cmd.get_text().strip(), "off": off_cmd.get_text().strip(), "status": st_cmd.get_text().strip()})
+        if not t["icon"]:
+            t["icon"] = {"open": "folder-symbolic", "command": "system-run-symbolic"}.get(k, "application-x-executable-symbolic")
+        dlg.destroy()
+
+        tiles = [x for x in (self.store.get(key) or []) if isinstance(x, dict)]
+        layout = [r for r in (self.store.get("toggle-layout") or []) if isinstance(r, dict)]
+        if new:
+            # Put it in Quick Settings now, or keep it in the hidden tiles for later?
+            ask = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                    buttons=Gtk.ButtonsType.NONE, text='Add "%s" to Quick Settings?' % t["name"])
+            ask.format_secondary_text("Yes puts the tile in Quick Settings now. No keeps it with the hidden tiles; "
+                                      "you can add it later with the pencil button or on the Tiles page.")
+            ask.add_button("No, Keep Hidden", Gtk.ResponseType.NO)
+            yes = ask.add_button("Yes, Add It", Gtk.ResponseType.YES)
+            yes.get_style_context().add_class("suggested-action")
+            ask.set_default_response(Gtk.ResponseType.YES)
+            show = ask.run() == Gtk.ResponseType.YES
+            ask.destroy()
+            tiles.append(t)
+            layout.append({"item": "custom:%s" % t["id"], "show": show})
+        else:
+            tiles = [t if x.get("id") == t["id"] else x for x in tiles]
+        self._save_custom(key, tiles, layout)
+
+    def _move_tile(self, key, i, step):
+        rows = list(self.store.get(key) or [])
+        j = i + step
+        if 0 <= j < len(rows):
+            rows[i], rows[j] = rows[j], rows[i]
+            self._set(key, rows)
+            self.refreshers[key]()
+
+    def _show_tile(self, key, i, on):
+        rows = [dict(r) for r in (self.store.get(key) or [])]
+        if i < len(rows) and rows[i].get("show", True) != on:
+            rows[i]["show"] = on
+            self._set(key, rows)
+            GLib.idle_add(lambda: (self.refreshers[key](), False)[1])
+
+    # ---- reset to defaults
+    def _page_keys(self, page):
+        keys = []
+        for section in self.layout.get(page, {}).get("sections", []):
+            for key in self.layout.get(section, {}).get("keys", []):
+                if key in self.schema and "default" in self.schema[key] and key not in keys:
+                    keys.append(key)
+        return keys
+
+    def _confirm_reset(self):
+        page = self.current_page if (self.current_page or "").startswith("page-") else None
+        title = self.layout.get(page, {}).get("title", "this page") if page else None
+        dlg = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                buttons=Gtk.ButtonsType.NONE, text="Reset to Defaults?")
+        everything_text = ("everything (tiles and their order, custom tiles, sliders, top row, panel icons, "
+                           "battery and appearance)")
+        dlg.format_secondary_text(
+            "Start your Quick Settings customization from scratch. Reset %s. "
+            "Remembered states such as your refresh rate and keyboard lighting are kept."
+            % (("just the %s page, or %s" % (title, everything_text)) if page else everything_text))
+        dlg.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        if page:
+            dlg.add_button("Reset %s Page" % title, 1)
+        everything = dlg.add_button("Reset Everything", 2)
+        everything.get_style_context().add_class("destructive-action")
+        dlg.set_default_response(Gtk.ResponseType.CANCEL)
+        resp = dlg.run()
+        dlg.destroy()
+        if resp == 1 and page:
+            self._reset(self._page_keys(page))
+        elif resp == 2:
+            keys = []
+            for pg in self.layout.get("pages", []):
+                keys += [k for k in self._page_keys(pg) if k not in keys]
+            self._reset(keys)
+
+    def _reset(self, keys):
+        if not keys:
+            return
+        values = {k: json.loads(json.dumps(self.schema[k]["default"])) for k in keys}
+        self.store.set_many(values)   # Quick Settings picks this up and animates to the defaults
+        self.store.muted_until = time.monotonic() + 0.8
+        self._building = False
+        for key in keys:
+            if key in self.refreshers:
+                self.refreshers[key]()
+        self.apply_style()
+        self._update_deps()
+
+    # ---- saving and live updates
+    def _set(self, key, value):
+        if self._building:
+            return
+        self.store.set(key, value)
+        for dep, target in self.option_deps:
+            if dep == key and target in self.refreshers:
+                self.refreshers[target]()
+        if key in ("card-style", "accent-color"):
+            self.apply_style()
+            if "accent-color" in self.refreshers:
+                self.refreshers["accent-color"]()
+        self._update_deps()
+
+    def _update_deps(self):
+        for widget, dep in self.deps:
+            widget.set_sensitive(bool(self.store.get(dep)))
+
+    def _on_file_changed(self, _mon, _f, _o, event):
+        if event not in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED):
+            return
+        if time.monotonic() < self.store.muted_until:
+            return
+        self.store.load()
+        for fn in self.refreshers.values():
+            fn()
+        self.apply_style()
+        self._update_deps()
+
+
+class App(Gtk.Application):
+    def __init__(self, args):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self.args = args
+        self.win = None
+
+    def do_activate(self):
+        if self.win:            # already open: bring it to the front
+            self.win.present()
+            return
+        with open(os.path.join(self.args.path, "settings-schema.json")) as f:
+            schema = json.load(f)
+        store = Store(self.args.uuid, self.args.instance, schema, self.args.file)
+        self.win = SettingsWindow(self, store, schema, self.args.page)
+        self.win.show_all()
+        self._place_left(self.win)
+        self.win.present()
+
+    @staticmethod
+    def _place_left(win):
+        # Quick Settings is pinned open on the right as a live preview; keep this window clear of it.
+        try:
+            display = Gdk.Display.get_default()
+            mon = display.get_primary_monitor() or display.get_monitor(0)
+            area = mon.get_workarea()
+            w, h = win.get_size()
+            win.resize(min(w, max(640, area.width - 460)), min(h, area.height - 48))
+            win.move(area.x + 24, area.y + 24)
+        except Exception:
+            pass
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--uuid", default="lmqs@henzljw")
+    parser.add_argument("--instance", default="0")
+    parser.add_argument("--path", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    parser.add_argument("--page", default="home")
+    parser.add_argument("--file", default=None, help="the applet's settings file (passed by the applet)")
+    args = parser.parse_args()
+    GLib.set_prgname("gqs-settings")
+    GLib.set_application_name("LMQS")
+    return App(args).run([sys.argv[0]])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
