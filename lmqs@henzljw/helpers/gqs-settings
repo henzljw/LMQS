@@ -61,6 +61,25 @@ TILE_INFO = {
     "Update Manager": "Opens Update Manager and shows how many updates are waiting.",
     "NVIDIA Settings": "Opens NVIDIA Settings and shows the current graphics mode.",
     "Discord": "Opens Discord, or brings it to the front if it's already open.",
+    "Files": "Opens the file manager (Nemo) in your home folder.",
+    "Firefox": "Opens Firefox, or brings it to the front.",
+    "Google Chrome": "Opens Google Chrome, or brings it to the front.",
+    "Brave": "Opens Brave, or brings it to the front.",
+    "Spotify": "Opens Spotify, or brings it to the front.",
+    "Steam": "Opens Steam, or brings it to the front.",
+    "LocalSend": "Opens LocalSend to share files with nearby devices.",
+    "Bitwarden": "Opens Bitwarden, or brings it to the front.",
+    "Android Studio": "Opens Android Studio, or brings it to the front.",
+    "Calculator": "Opens the calculator.",
+    "Driver Manager": "Opens Driver Manager to install graphics and other drivers.",
+    "Show Desktop": "Minimizes all windows to show the desktop. Tap again to bring them back.",
+    "Trash": "Opens the Trash and shows how many items it holds. The arrow can empty it.",
+    "Accessibility": "Opens Accessibility settings: zoom, screen reader, large text and more.",
+    "Ulauncher": "Shows Ulauncher's search box to find and open apps.",
+    "ProtonVPN": "Opens Proton VPN, or brings it to the front.",
+    "Emote": "Opens Emote to pick and copy an emoji.",
+    "LibreOffice": "Opens LibreOffice Start Center.",
+    "Startup Applications": "Opens the list of apps that start when you log in.",
 }
 COPYRIGHT = "Copyright \u00a9 2026 Henry henz"
 LICENSE_TEXT = "All rights reserved."
@@ -231,6 +250,8 @@ entry:focus, spinbutton:focus, combobox button:focus { border-color: @gqs_accent
 scale highlight, progressbar progress { background-color: @gqs_accent; background-image: none; border-color: @gqs_accent; }
 *:link, button.link label, .link { color: @gqs_accent; }
 
+button.shape-card.selected { border-color: @gqs_accent; background-color: alpha(@gqs_accent, 0.08); }
+
 /* pages */
 .version-pill { background-color: alpha(@gqs_accent, 0.16); color: @gqs_accent; }
 .nav-row:focus .nav-title { color: @gqs_accent; }
@@ -255,6 +276,10 @@ def gnome_css():
 .info-row { padding: 12px 16px; }
 .info-key { opacity: 0.7; }
 .legal-text { padding: 14px 16px; }
+.release-title { font-weight: bold; font-size: 12pt; }
+.release-sub { font-weight: bold; opacity: 0.75; margin-top: 4px; }
+button.shape-card { padding: 8px; border-radius: 14px; border: 2px solid transparent; background-image: none; box-shadow: none; }
+button.shape-card:hover { background-color: alpha(currentColor, 0.05); }
 .page-title { font-size: 17pt; font-weight: bold; }
 .card { background-color: @theme_base_color; border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); padding: 4px 0; }
 .card-title { font-weight: bold; margin: 8px 12px 4px 12px; }
@@ -344,6 +369,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self._build_page(page)
         self._add_page("about", "About", self._build_about())
         self._add_page("about-details", "Details", self._build_details())
+        self._add_page("about-changes", "What\u2019s New", self._build_changes())
         self._add_page("about-credits", "Credits", self._build_credits())
         self._add_page("about-legal", "Legal", self._build_legal())
 
@@ -521,7 +547,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
     def _build_about(self):
         clamp = self._clamp(480)
         clamp.pack_start(self._hero("About LMQS"), False, False, 0)
-        clamp.pack_start(self._boxed([self._nav_row("Details", "about-details")]), False, False, 0)
+        clamp.pack_start(self._boxed([self._nav_row("What\u2019s New", "about-changes"),
+                                      self._nav_row("Details", "about-details")]), False, False, 0)
         clamp.pack_start(self._boxed([self._nav_row("Credits", "about-credits"),
                                       self._nav_row("Legal", "about-legal")]), False, False, 0)
         return clamp
@@ -543,6 +570,63 @@ class SettingsWindow(Gtk.ApplicationWindow):
             self._info_row("Settings file", self.store.path),
         ]
         clamp.pack_start(self._boxed(rows), False, False, 0)
+        return clamp
+
+    def _read_changelog(self):
+        """CHANGELOG.md -> [(version, date, [notes...])]: "## 1.1.0 — 2026-11-24" headings, "- " items."""
+        releases = []
+        try:
+            with open(os.path.join(self.app_path, "CHANGELOG.md")) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return releases
+        for line in lines:
+            m = re.match(r"^##\s+([^\s\u2014-]+)\s*(?:[\u2014-]+\s*(.*))?$", line.strip())
+            if m:
+                releases.append((m.group(1), (m.group(2) or "").strip(), []))
+            elif releases and line.strip().startswith("### "):
+                releases[-1][2].append("###" + line.strip()[4:])   # a group heading: New, Improved…
+            elif releases and line.strip().startswith("- "):
+                releases[-1][2].append("\u2022  " + line.strip()[2:])
+            elif releases and line.strip() and not line.startswith("#"):
+                releases[-1][2].append(line.strip())   # a plain sentence (e.g. "First release.")
+        return releases
+
+    def _build_changes(self):
+        clamp = self._clamp(560)
+        releases = self._read_changelog()
+        if not releases:
+            clamp.pack_start(self._boxed([self._text_block("No changelog found.")]), False, False, 0)
+            return clamp
+        current = self.meta.get("version", "")
+        for version, date, notes in releases:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            card.get_style_context().add_class("legal-text")
+            head = Gtk.Box(spacing=8)
+            title = Gtk.Label(label="Version %s" % version, xalign=0)
+            title.get_style_context().add_class("release-title")
+            head.pack_start(title, False, False, 0)
+            if version == current:
+                tag = Gtk.Label(label="Installed")
+                tag.get_style_context().add_class("version-pill")
+                tag.set_valign(Gtk.Align.CENTER)
+                head.pack_start(tag, False, False, 0)
+            if date:
+                d = Gtk.Label(label=date, xalign=1)
+                d.get_style_context().add_class("nav-hint")
+                head.pack_end(d, False, False, 0)
+            card.pack_start(head, False, False, 2)
+            for note in notes:
+                if note.startswith("###"):
+                    sub = Gtk.Label(label=note[3:].strip(), xalign=0)
+                    sub.get_style_context().add_class("release-sub")
+                    card.pack_start(sub, False, False, 4)
+                    continue
+                lab = Gtk.Label(label=note, xalign=0, wrap=True, selectable=True)
+                lab.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                lab.set_max_width_chars(70)
+                card.pack_start(lab, False, False, 0)
+            clamp.pack_start(self._boxed([card]), False, False, 0)
         return clamp
 
     def _build_credits(self):
@@ -604,6 +688,8 @@ class SettingsWindow(Gtk.ApplicationWindow):
         kind = spec.get("type")
         desc = spec.get("description", key)
         row = None
+        if key == "button-shape":
+            return self._build_shape_row(key, desc)
         if kind == "generic" and key == "custom-tiles":
             return self._build_custom_tiles(key)
         if kind == "label":
@@ -629,6 +715,14 @@ class SettingsWindow(Gtk.ApplicationWindow):
             def refresh(combo=combo, key=key, hide=hide, all_options=all_options):
                 self._building = True
                 shown = all_options
+                if key == "columns" and (self.store.get("tile-style") or "long") == "round":
+                    # Round buttons: show how many fit per row at each card width
+                    # (1 and 2 columns are the same width, so only one of them is offered).
+                    shown = [("%d columns" % self._round_per_row(int(v)), v) for (_l, v) in all_options if int(v) >= 2]
+                if key == "rows-per-page":
+                    # Only row counts that change something: more rows than your tiles fill do nothing.
+                    most = self._rows_needed()
+                    shown = [(l, v) for (l, v) in all_options if int(v) <= most] or all_options[:1]
                 if hide and self.store.get(hide["key"]) == hide["equals"]:
                     shown = [(l, v) for (l, v) in all_options if v not in hide["hide"]]
                     if self.store.get(key) in hide["hide"]:
@@ -638,6 +732,10 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 for label, _value in shown:
                     combo.append_text(label)
                 cur = self.store.get(key)
+                if key == "columns" and shown and int(cur or 2) < min(int(v) for _l, v in shown):
+                    cur = min(int(v) for _l, v in shown)   # 1 column = same width as 2 for round buttons
+                if key == "rows-per-page" and shown and int(cur or 4) > max(int(v) for _l, v in shown):
+                    cur = max(int(v) for _l, v in shown)   # fewer rows than chosen are needed: show that
                 if key == "panel-battery-time" and isinstance(cur, bool):
                     cur = "panel" if cur else "off"   # was an on/off switch in 3.4.0
                 idx = next((i for i, (_l, v) in enumerate(options) if str(v) == str(cur)), 0)
@@ -647,6 +745,11 @@ class SettingsWindow(Gtk.ApplicationWindow):
             combo.connect("changed", lambda w, options=options: self._set(key, options[w.get_active()][1]) if w.get_active() >= 0 else None)
             if hide:
                 self.option_deps.append((hide["key"], key))
+            if key == "rows-per-page":
+                for dep in ("tile-style", "columns", "toggle-layout", "custom-tiles"):
+                    self.option_deps.append((dep, key))
+            if key == "columns":
+                self.option_deps.append(("tile-style", key))
             self.refreshers[key] = refresh
             row = self._row(desc, combo, spec.get("tooltip"))
         elif kind == "colorchooser":
@@ -655,7 +758,142 @@ class SettingsWindow(Gtk.ApplicationWindow):
             row = self._build_tile_list(key)
         if row is not None and spec.get("dependency"):
             self.deps.append((row, spec["dependency"]))
+        if row is not None and spec.get("gqs-disable-when"):
+            # Greyed out while another setting has a given value (e.g. names with small tiles).
+            w = spec["gqs-disable-when"]
+            self.deps.append((row, lambda w=w: self.store.get(w["key"]) != w["equals"]))
         return row
+
+    # ---- how many tile rows your tiles actually fill (same rules as Quick Settings)
+    def _tiles_per_row(self):
+        cols = max(1, min(5, int(self.store.get("columns") or 2)))
+        width = {1: 376, 2: 376, 3: 552, 4: 708, 5: 868}[cols]
+        style = self.store.get("tile-style") or "long"
+        if style == "round":
+            return self._round_per_row(cols)
+        if style == "small":
+            return cols
+        return cols
+
+    @staticmethod
+    def _round_per_row(cols):
+        """Round buttons per row at the card width for this many columns (as Quick Settings does)."""
+        width = {1: 376, 2: 376, 3: 552, 4: 708, 5: 868}[max(1, min(5, int(cols)))]
+        return max(4, (width + 8) // 60)
+
+    def _rows_needed(self):
+        rows = [r for r in (self.store.get("toggle-layout") or []) if isinstance(r, dict)]
+        shown = sum(1 for r in rows if r.get("show", True)) if rows else 6
+        per = self._tiles_per_row()
+        return max(1, -(-shown // per))
+
+    # ---- button shape: four preview cards drawn in the accent colour
+    SHAPES = [("pill", "Pill"), ("square", "Square"), ("squircle", "Squircle"),
+              ("teardrop", "Teardrop"), ("rhombus", "Rhombus"), ("window", "Window")]
+
+    @staticmethod
+    def _shape_radii(shape, w, h, button=False):
+        """Corner radii (top-left, top-right, bottom-right, bottom-left) like Quick Settings draws them."""
+        full = min(w, h) / 2
+        # Same proportions as the real tiles (48px) and buttons (40px), scaled to the preview.
+        if shape == "square":
+            r = 6 * h / (40 if button else 48)
+            return (r, r, r, r)
+        if shape == "squircle":
+            r = (13 if button else 16) * h / (40 if button else 48)
+            return (r, r, r, r)
+        tight = 4 * h / (40 if button else 48)
+        if shape == "teardrop":
+            return (full, full, 3.5, full)
+        soft = (15 if button else 18) * h / (40 if button else 48)
+        tight = (5 if button else 6) * h / (40 if button else 48)
+        if shape == "rhombus":
+            return (soft, tight, soft, tight)
+        if shape == "window":
+            return (soft, soft, tight, tight)
+        return (full, full, full, full)   # pill: fully rounded
+
+    @staticmethod
+    def _round_rect(cr, x, y, w, h, radii):
+        import math
+        tl, tr, br, bl = [min(r, w / 2, h / 2) for r in radii]
+        cr.new_sub_path()
+        cr.arc(x + w - tr, y + tr, tr, -math.pi / 2, 0)
+        cr.arc(x + w - br, y + h - br, br, 0, math.pi / 2)
+        cr.arc(x + bl, y + h - bl, bl, math.pi / 2, math.pi)
+        cr.arc(x + tl, y + tl, tl, math.pi, 1.5 * math.pi)
+        cr.close_path()
+
+    def _draw_shape_preview(self, area, cr, shape):
+        w, h = area.get_allocated_width(), area.get_allocated_height()
+        r, g, b = [v / 255 for v in parse_color(self.store.get("accent-color"))]
+        dark = self.store.get("card-style") != "light"
+        # little Quick Settings card
+        self._round_rect(cr, 2, 2, w - 4, h - 4, (14, 14, 14, 14))
+        cr.set_source_rgb(*((0.18, 0.18, 0.2) if dark else (0.97, 0.97, 0.98)))
+        cr.fill()
+        grey = (0.3, 0.3, 0.32) if dark else (0.86, 0.86, 0.88)
+        # top row: round buttons
+        bw = 22
+        bh = 22
+        x = w - 12 - 3 * bw - 2 * 6
+        for i in range(3):
+            self._round_rect(cr, x + i * (bw + 6), 10, bw, bh, self._shape_radii(shape, bw, bh, True))
+            cr.set_source_rgb(*((r, g, b) if i == 0 else grey))
+            cr.fill()
+        # tiles: one on (accent, with arrow part), one off
+        tw, th, ty = (w - 24 - 8) / 2, 28, 42
+        self._round_rect(cr, 12, ty, tw, th, self._shape_radii(shape, tw, th))
+        cr.set_source_rgb(r, g, b)
+        cr.fill()
+        self._round_rect(cr, 12 + tw + 8, ty, tw, th, self._shape_radii(shape, tw, th))
+        cr.set_source_rgb(*grey)
+        cr.fill()
+        # second row
+        self._round_rect(cr, 12, ty + th + 8, tw, th, self._shape_radii(shape, tw, th))
+        cr.set_source_rgb(*grey)
+        cr.fill()
+        return False
+
+    def _build_shape_row(self, key, desc):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.get_style_context().add_class("row")
+        lab = Gtk.Label(label=desc, xalign=0)
+        lab.get_style_context().add_class("row-label")
+        outer.pack_start(lab, False, False, 0)
+        grid = Gtk.Grid(column_spacing=10, row_spacing=10, column_homogeneous=True)
+        cards = {}
+        for shape, name in self.SHAPES:
+            btn = Gtk.Button()
+            btn.get_style_context().add_class("shape-card")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            area = Gtk.DrawingArea()
+            area.set_size_request(120, 112)
+            area.connect("draw", lambda a, cr, sh=shape: self._draw_shape_preview(a, cr, sh))
+            box.pack_start(area, False, False, 0)
+            box.pack_start(Gtk.Label(label=name + (" (GNOME)" if shape == "pill" else "")), False, False, 0)
+            btn.add(box)
+            btn.connect("clicked", lambda _b, sh=shape: (self._set(key, sh), refresh()))
+            n = len(cards)
+            grid.attach(btn, n % 3, n // 3, 1, 1)
+            cards[shape] = (btn, area)
+
+        def refresh():
+            cur = self.store.get(key) or "pill"
+            if cur == "circle":
+                cur = "pill"   # earlier name for the GNOME look
+            for shape, (btn, area) in cards.items():
+                ctx = btn.get_style_context()
+                (ctx.add_class if shape == cur else ctx.remove_class)("selected")
+                area.queue_draw()   # follows accent colour and light/dark changes too
+        refresh()
+        self.refreshers[key] = refresh
+        self.shape_refresh = refresh
+        outer.pack_start(grid, False, False, 0)
+        hint = Gtk.Label(label="The shape of tiles and buttons in Quick Settings.", xalign=0, wrap=True)
+        hint.get_style_context().add_class("row-hint")
+        outer.pack_start(hint, False, False, 0)
+        return outer
 
     def _build_color_row(self, key, desc):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -863,7 +1101,7 @@ class SettingsWindow(Gtk.ApplicationWindow):
 
     def _save_custom(self, key, tiles, layout):
         self.store.set_many({key: tiles, "toggle-layout": layout})
-        for k in (key, "toggle-layout"):
+        for k in (key, "toggle-layout", "rows-per-page"):
             if k in self.refreshers:
                 self.refreshers[k]()
 
@@ -1141,13 +1379,15 @@ class SettingsWindow(Gtk.ApplicationWindow):
                 self.refreshers[target]()
         if key in ("card-style", "accent-color"):
             self.apply_style()
+            if getattr(self, "shape_refresh", None):
+                self.shape_refresh()
             if "accent-color" in self.refreshers:
                 self.refreshers["accent-color"]()
         self._update_deps()
 
     def _update_deps(self):
         for widget, dep in self.deps:
-            widget.set_sensitive(bool(self.store.get(dep)))
+            widget.set_sensitive(bool(dep() if callable(dep) else self.store.get(dep)))
 
     def _on_file_changed(self, _mon, _f, _o, event):
         if event not in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CREATED):

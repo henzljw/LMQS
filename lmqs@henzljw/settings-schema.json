@@ -83,7 +83,8 @@
                 "notifications-position",
                 "notif-compact",
                 "refresh-rate-remember",
-                "bt-at-login"
+                "bt-at-login",
+                "kbd-at-login"
             ]
         },
         "page-panel": {
@@ -142,6 +143,9 @@
                 "card-style",
                 "style-system-wide",
                 "accent-color",
+                "button-shape",
+                "tile-style",
+                "tile-labels",
                 "columns",
                 "rows-per-page",
                 "keep-page-height",
@@ -264,6 +268,82 @@
             },
             {
                 "item": "Discord",
+                "show": false
+            },
+            {
+                "item": "Files",
+                "show": false
+            },
+            {
+                "item": "Firefox",
+                "show": false
+            },
+            {
+                "item": "Google Chrome",
+                "show": false
+            },
+            {
+                "item": "Brave",
+                "show": false
+            },
+            {
+                "item": "Spotify",
+                "show": false
+            },
+            {
+                "item": "Steam",
+                "show": false
+            },
+            {
+                "item": "LocalSend",
+                "show": false
+            },
+            {
+                "item": "Bitwarden",
+                "show": false
+            },
+            {
+                "item": "Android Studio",
+                "show": false
+            },
+            {
+                "item": "Calculator",
+                "show": false
+            },
+            {
+                "item": "Driver Manager",
+                "show": false
+            },
+            {
+                "item": "Show Desktop",
+                "show": false
+            },
+            {
+                "item": "Trash",
+                "show": false
+            },
+            {
+                "item": "Accessibility",
+                "show": false
+            },
+            {
+                "item": "Ulauncher",
+                "show": false
+            },
+            {
+                "item": "ProtonVPN",
+                "show": false
+            },
+            {
+                "item": "Emote",
+                "show": false
+            },
+            {
+                "item": "LibreOffice",
+                "show": false
+            },
+            {
+                "item": "Startup Applications",
                 "show": false
             }
         ]
@@ -462,6 +542,41 @@
         "default": "rgb(53,132,228)",
         "description": "Accent color"
     },
+    "button-shape": {
+        "type": "combobox",
+        "default": "pill",
+        "description": "Button shape",
+        "options": {
+            "Pill (GNOME default)": "pill",
+            "Square": "square",
+            "Squircle": "squircle",
+            "Teardrop": "teardrop",
+            "Rhombus": "rhombus",
+            "Window": "window"
+        },
+        "tooltip": "The shape of tiles and buttons in Quick Settings. Pill: rounded tiles and round buttons, like GNOME. Square: small corners. Squircle: soft rounded squares. Teardrop: one tight corner. Rhombus: two opposite corners round, two tight (a slanted diamond look). Window: round on top, square at the bottom."
+    },
+    "tile-style": {
+        "type": "combobox",
+        "default": "long",
+        "description": "Tile style",
+        "options": {
+            "Long tiles (GNOME)": "long",
+            "Big tiles": "small",
+            "Small tiles": "round"
+        },
+        "tooltip": "Long tiles show the icon, name and status, like GNOME. Big tiles show the icon above the name, one per column. Small tiles are icon-only round buttons that fill the width of Quick Settings (hover for the name). Long and big tiles keep the arrow for menus (Wi-Fi, Bluetooth\u2026); on small tiles, right-click to open the menu."
+    },
+    "tile-labels": {
+        "type": "switch",
+        "default": true,
+        "description": "Show names on tiles",
+        "tooltip": "Long and big tiles: show each tile's name (and status on long tiles). Turn off for icon-only tiles; the name then appears when you hover. Not available for small tiles, which never show names.",
+        "gqs-disable-when": {
+            "key": "tile-style",
+            "equals": "round"
+        }
+    },
     "columns": {
         "type": "combobox",
         "default": 2,
@@ -554,6 +669,10 @@
         "type": "generic",
         "default": {}
     },
+    "kbd-last-level": {
+        "type": "generic",
+        "default": null
+    },
     "show-notifications": {
         "type": "switch",
         "default": true,
@@ -620,6 +739,17 @@
             "Leave to the system": "system"
         },
         "tooltip": "Linux turns Bluetooth on at every boot, and Bluetooth Manager (Blueman) may switch it on too. Quick Settings applies your choice for the first minute after login, after waking from suspend and whenever the adapter reappears. 'Always off' also stops Blueman powering it on. To stop it at boot entirely, re-run install.sh with --bt-boot-off."
+    },
+    "kbd-at-login": {
+        "type": "combobox",
+        "default": "remember",
+        "description": "Keyboard light at login",
+        "options": {
+            "Remember last state": "remember",
+            "Always off": "off",
+            "Leave to the laptop": "system"
+        },
+        "tooltip": "Many laptops turn the keyboard light on at every start-up. Remember puts back the state you left it in (also after waking from suspend); Always off starts with it off. Note: on keyboards that don't report Fn-key changes (such as Legion RGB keyboards), only changes made in Quick Settings are remembered, so choose Always off if you usually keep it off."
     },
     "bt-last-powered": {
         "type": "generic",
