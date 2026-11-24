@@ -765,12 +765,20 @@ class QSToggle {
         let content = new St.BoxLayout({ style_class: 'gqs-toggle-content', x_expand: true, y_align: CENTER });
         this._icon = new St.Icon({ style_class: 'gqs-toggle-icon', icon_size: 16, y_align: CENTER });
         let labels = new St.BoxLayout({ vertical: true, x_expand: true, y_align: CENTER, style_class: 'gqs-toggle-labels' });
+        // A name that doesn't fit is split onto two lines at a space (see _splitTitle);
+        // the status stays one line.
+        this._titleText = params.title;
         this._title = ellipsize(new St.Label({ style_class: 'gqs-toggle-title', text: params.title }));
         this._subtitle = ellipsize(new St.Label({ style_class: 'gqs-toggle-subtitle', text: '', visible: false }));
         labels.add_child(this._title);
         labels.add_child(this._subtitle);
         content.add_child(this._icon);
         content.add_child(labels);
+        // Re-split the name whenever the space for it changes (columns, tile style, …).
+        labels.connect('notify::width', () => this._queueSplit());
+        this._content = content;
+        this._labels = labels;
+        this._tileStyle = 'long';
 
         this._main = fill(new St.Button({
             style_class: 'gqs-toggle-main', child: content,
@@ -781,6 +789,12 @@ class QSToggle {
             this.activate();
         });
         this._main.connect('notify::hover', () => this.repaint());
+        // Right-click opens the tile's menu (the only way in round/small styles, which have no arrow).
+        this._main.connect('button-release-event', (a, e) => {
+            if (e.get_button() !== 3 || !this.menu || applet._editing) return Clutter.EVENT_PROPAGATE;
+            applet.toggleSubmenu(this.menu);
+            return Clutter.EVENT_STOP;
+        });
         this.actor.add_child(this._main);
 
         this.menu = null;
@@ -809,7 +823,7 @@ class QSToggle {
         this._applet.queueCompactSync();
     }
 
-    get title() { return this._title.text; }
+    get title() { return this._titleText || this._title.text; }
 
     // Same as clicking the tile (used by the round buttons in the compact row).
     activate() {
@@ -817,13 +831,17 @@ class QSToggle {
         if (this._onClicked) this._onClicked(this);
     }
 
-    setTitle(text) { setText(this._title, text); }
+    setTitle(text) {
+        this._titleText = text || '';
+        setText(this._title, this._titleText);
+        this._queueSplit();
+    }
 
     setSubtitle(text) {
         this._sub = text || '';
         let shown = this.available ? this._sub : this._unavailText;
         setText(this._subtitle, shown);
-        this._subtitle.visible = !!shown;
+        this._subtitle.visible = !!shown && (!this._tileStyle || this._tileStyle === 'long') && this._showLabels !== false;
     }
 
     // Hardware/connection present? Unavailable tiles stay on the grid, dimmed and switched off.
@@ -856,7 +874,8 @@ class QSToggle {
 
     repaint() {
         this._applet.paintAccent(this._main, this.checked);
-        if (this._arrow) this._applet.paintAccent(this._arrow, this.checked);
+        // The tab under a round button stays plain; elsewhere the arrow shares the tile's colour.
+        if (this._arrow) this._applet.paintAccent(this._arrow, this.checked && this._tileStyle !== 'round');
         if (this.menu) this.menu.repaint();
     }
 
@@ -867,6 +886,108 @@ class QSToggle {
 
     setMenuOpen(open) {
         if (this._arrowIcon) this._applet.rotateArrow(this._arrowIcon, open);
+    }
+
+    _queueSplit() {
+        if (this._splitQueued) return;
+        this._splitQueued = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._splitQueued = 0;
+            this._splitTitle();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /* Names that don't fit on one line go onto two lines, broken at a space, with a real line
+       break: the tile then knows it's two lines tall and centres both next to the icon.
+       (Automatic wrapping isn't measured properly inside a row of icon + text.) */
+    _splitTitle() {
+        let text = this._titleText || '';
+        let room = this._labels.width;
+        let out = text;
+        if (room > 0 && text.includes(' ')) {
+            let measure = str => {
+                try {
+                    let layout = this._title.clutter_text.get_layout().copy();
+                    layout.set_width(-1);
+                    layout.set_ellipsize(Pango.EllipsizeMode.NONE);
+                    layout.set_text(str, -1);
+                    return layout.get_pixel_size()[0];
+                } catch (e) { return 0; }
+            };
+            if (measure(text) > room) {
+                // Fill the first line with as many words as fit; the rest go on the second line.
+                let words = text.split(' ');
+                let first = words[0];
+                let i = 1;
+                for (; i < words.length; i++) {
+                    let tryLine = first + ' ' + words[i];
+                    if (measure(tryLine) > room) break;
+                    first = tryLine;
+                }
+                if (i < words.length) out = first + '\n' + words.slice(i).join(' ');
+            }
+        }
+        if (this._title.text !== out) this._title.text = out;
+    }
+
+    /* Tile style: 'long' (GNOME: icon + name + status, arrow for the menu),
+       'round' (icon-only round buttons, like the compact row; name in a tooltip),
+       'small' (icon above a short name). Round and small open their menu with right-click. */
+    setTileStyle(style, showLabels = true) {
+        if (this._tileStyle === style && this._showLabels === showLabels) return;
+        this._tileStyle = style;
+        this._showLabels = showLabels;
+        let long = style === 'long';
+        let labels = style !== 'round' && showLabels;
+        this._labels.visible = labels;
+        this._subtitle.opacity = long ? 255 : 0;
+        this._subtitle.visible = long && !!this._subtitle.text;
+        this._content.vertical = style === 'small';
+        // Small tiles: the name takes the tile's full width and wraps onto the next line,
+        // centred line by line (centring the label itself would let it grow past the tile).
+        let fillWidth = long || style === 'small';
+        this._content.x_align = fillWidth && labels ? Clutter.ActorAlign.FILL : CENTER;
+        this._labels.x_align = Clutter.ActorAlign.FILL;
+        this._labels.x_expand = true;
+        this._icon.y_align = CENTER;
+        this._icon.x_align = long && labels ? Clutter.ActorAlign.START : CENTER;
+        // Small tiles: every line of the name centred under the icon.
+        try {
+            this._title.clutter_text.line_alignment = long ? Pango.Alignment.LEFT : Pango.Alignment.CENTER;
+            this._title.clutter_text.x_align = long ? Clutter.ActorAlign.START : CENTER;
+        } catch (e) { }
+        if (long) this._title.remove_style_class_name('gqs-centered');
+        else this._title.add_style_class_name('gqs-centered');
+        this._title.x_align = Clutter.ActorAlign.FILL;
+        this._icon.icon_size = style === 'round' ? 20 : (style === 'small' ? 20 : 16);
+        // Long and small tiles keep their arrow on the right; round buttons have none
+        // (right-click opens their menu) and stay full circles.
+        let round = style === 'round';
+        if (this._arrow) this._arrow.visible = !round;
+        this.actor.vertical = round;
+        if (this.menu) {
+            if (round) this.actor.remove_style_class_name('has-menu');
+            else this.actor.add_style_class_name('has-menu');
+        }
+        // Round buttons stay round: a fixed square centred in their cell (arrow tab below it).
+        this._main.x_expand = !round;
+        this._main.y_expand = !round;
+        this.actor.x_align = round ? CENTER : Clutter.ActorAlign.FILL;
+        this.actor.y_align = round ? Clutter.ActorAlign.START : Clutter.ActorAlign.FILL;
+        if (this._arrow) {
+            this._arrow.x_expand = false;
+            this._arrow.y_expand = !round;
+            this._arrow.x_align = round ? CENTER : Clutter.ActorAlign.FILL;
+        }
+        this.repaint();
+        // No name on the tile: show it when hovering instead.
+        if (!labels && !this._tooltip) {
+            try { this._tooltip = new imports.ui.tooltips.Tooltip(this._main, this.title); } catch (e) { }
+        }
+        if (this._tooltip) {
+            try { this._tooltip.set_text(this.title); } catch (e) { }
+            this._tooltip.preventShow = labels;
+        }
     }
 }
 
@@ -884,7 +1005,7 @@ const SETTING_KEYS = [
     'panel-nightlight', 'panel-airplane', 'panel-dnd', 'panel-caffeine', 'panel-mic', 'panel-camera', 'panel-scroll-volume',
     'card-style', 'accent-color', 'columns', 'animation-speed', 'refresh-rate-remember', 'refresh-rate-memory', 'refresh-rate-verified', 'kbd-rgb-state', 'show-notifications', 'notifications-expanded', 'notifications-position', 'media-expanded', 'show-configure', 'rows-per-page', 'keep-page-height', 'bt-at-login', 'bt-last-powered', 'style-system-wide', 'panel-net-speed', 'panel-net-speed-show',
     'panel-scroll-touchpad', 'scroll-volume-slider', 'scroll-mic-slider', 'scroll-brightness-slider',
-    'custom-tiles', 'custom-tiles-state', 'notif-compact',
+    'custom-tiles', 'custom-tiles-state', 'notif-compact', 'kbd-at-login', 'kbd-last-level', 'button-shape', 'tile-style', 'tile-labels',
 ];
 
 const SETTING_DEFAULTS = {
@@ -893,7 +1014,7 @@ const SETTING_DEFAULTS = {
     'show-media-card': true, 'panel-network': true, 'panel-volume': true, 'panel-battery': true,
     'panel-battery-style': 'system', 'panel-battery-percent-mode': 'off', 'panel-battery-time': 'off', 'panel-bluetooth': true, 'panel-nightlight': true, 'panel-airplane': true,
     'panel-dnd': true, 'panel-caffeine': true, 'panel-mic': true, 'panel-camera': true, 'panel-scroll-volume': true,
-    'card-style': 'dark', 'accent-color': 'rgb(53,132,228)', 'columns': 2, 'animation-speed': 'normal', 'refresh-rate-remember': true, 'refresh-rate-memory': {}, 'refresh-rate-verified': {}, 'kbd-rgb-state': {}, 'show-notifications': true, 'notifications-expanded': false, 'notifications-position': 'bottom', 'media-expanded': false, 'show-configure': true, 'rows-per-page': 4, 'keep-page-height': true, 'bt-at-login': 'remember', 'bt-last-powered': null, 'style-system-wide': false, 'panel-net-speed': false, 'panel-net-speed-show': 'both', 'panel-scroll-touchpad': true, 'scroll-volume-slider': 'both', 'scroll-mic-slider': 'both', 'scroll-brightness-slider': 'both', 'custom-tiles': [], 'custom-tiles-state': {}, 'notif-compact': true,
+    'card-style': 'dark', 'accent-color': 'rgb(53,132,228)', 'columns': 2, 'animation-speed': 'normal', 'refresh-rate-remember': true, 'refresh-rate-memory': {}, 'refresh-rate-verified': {}, 'kbd-rgb-state': {}, 'show-notifications': true, 'notifications-expanded': false, 'notifications-position': 'bottom', 'media-expanded': false, 'show-configure': true, 'rows-per-page': 4, 'keep-page-height': true, 'bt-at-login': 'remember', 'bt-last-powered': null, 'style-system-wide': false, 'panel-net-speed': false, 'panel-net-speed-show': 'both', 'panel-scroll-touchpad': true, 'scroll-volume-slider': 'both', 'scroll-mic-slider': 'both', 'scroll-brightness-slider': 'both', 'custom-tiles': [], 'custom-tiles-state': {}, 'notif-compact': true, 'kbd-at-login': 'remember', 'kbd-last-level': null, 'button-shape': 'pill', 'tile-style': 'long', 'tile-labels': true,
 };
 
 class GnomeQuickSettingsApplet extends Applet.Applet {
@@ -1030,18 +1151,18 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
        re-layout happens while they're invisible, with a frame to finish before fading in. */
     _applySettingsAnimated(keys) {
         if ((keys || []).some(k => k === 'card-style' || k === 'style-system-wide')) this._pushStyleToSystem();
-        const QUIET = ['refresh-rate-memory', 'refresh-rate-verified', 'kbd-rgb-state', 'notifications-expanded',
+        const QUIET = ['refresh-rate-memory', 'refresh-rate-verified', 'kbd-rgb-state', 'kbd-last-level', 'notifications-expanded',
             'media-expanded', 'bt-last-powered'];
         keys = (keys || []).filter(k => !QUIET.includes(k));
         if (!keys.length || !this.menu.isOpen || !this._animFactor() || this._editing || !this._shell) { this._applySettings(); return; }
         if (this._cfgAnim) { this._cfgAnimAgain = true; return; }
         this._cfgAnim = true;
-        const LOOK = ['accent-color', 'card-style', 'animation-speed'];
+        const LOOK = ['accent-color', 'card-style', 'animation-speed', 'button-shape'];
         let layout = keys.some(k => !LOOK.includes(k));
         let a = this._shell;
-        let redirect = (on) => {
-            try { a.offscreen_redirect = on ? Clutter.OffscreenRedirect.ALWAYS : Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY; } catch (e) { }
-        };
+        // Draw live during the fade (no cached snapshot): a snapshot taken before the new layout
+        // settled could show tiles on top of each other until the fade ended.
+        let redirect = () => { };
         let fadeIn = () => {
             redirect(true);
             a.opacity = 0;
@@ -1057,8 +1178,8 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
             redirect(false);
             this._cfgAnimAgain = false;   // this apply picks up everything changed so far
             this._applySettings();
-            // One frame for the new layout to settle before anything moves again.
-            this._queue('cfg-anim-in', 32, fadeIn);
+            // Let the new layout settle (tile sizes, scrolling, hidden tiles) before fading back in.
+            this._queue('cfg-anim-in', 140, fadeIn);
         }, Clutter.AnimationMode.EASE_IN_QUAD);
     }
 
@@ -1085,6 +1206,8 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     _applySettings() {
         this._syncCustomTiles();
         this._applyCardStyle();
+        this._applyShape();
+        this._applyTileStyle();
         if (this._animFactor()) this._main.remove_style_class_name('gqs-no-anim');
         else this._main.add_style_class_name('gqs-no-anim');
 
@@ -1121,6 +1244,25 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
         this._updateRows();
         this._refreshPanel();
         this._relayout();
+        // Shape, rows per page or columns change the card's height: re-decide whether it needs
+        // to scroll once the new layout has settled, so nothing gets squeezed on top of each other.
+        this._trayRowH = 0; this._trayFullH = 0;
+        for (let ms of [0, 200, 500]) this._queue('rescroll-' + ms, ms + 1, () => {
+            for (let sv of [this._qsScroll, this._notif && this._notif.scroll]) if (sv && sv._gqsQueueCheck) sv._gqsQueueCheck();
+        });
+    }
+
+    // Button shape: one class on the card switches the corner rounding of every button.
+    _applyShape() {
+        let shape = this.cfg('button-shape');
+        if (shape === 'circle') shape = 'pill';   // earlier name for the GNOME look
+        const SHAPES = ['pill', 'square', 'squircle', 'teardrop', 'rhombus', 'window'];
+        if (!SHAPES.includes(shape)) shape = 'pill';
+        for (let x of ['circle'].concat(SHAPES)) {
+            if (x === shape) this._main.add_style_class_name('gqs-shape-' + x);
+            else this._main.remove_style_class_name('gqs-shape-' + x);
+        }
+        this._shape = shape;
     }
 
     // Light/dark card and the accent colours that go with it.
@@ -2409,6 +2551,65 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
         this._discordTile = this._addAppTile('Discord', _('Discord'),
             ['discord.desktop', 'com.discordapp.Discord.desktop', 'discord-ptb.desktop', 'discord-canary.desktop', 'vesktop.desktop', 'dev.vencord.Vesktop.desktop'],
             ['discord', 'com.discordapp.Discord', 'internet-chat-symbolic']);
+        // More app tiles (native, Flatpak and Snap names are all tried).
+        const APPS = [
+            ['Files', _('Files'), ['nemo.desktop', 'org.gnome.Nautilus.desktop', 'thunar.desktop', 'org.kde.dolphin.desktop'], ['system-file-manager', 'folder-symbolic']],
+            ['Firefox', _('Firefox'), ['firefox.desktop', 'org.mozilla.firefox.desktop', 'firefox_firefox.desktop', 'firefox-esr.desktop'], ['firefox', 'web-browser-symbolic']],
+            ['Google Chrome', _('Google Chrome'), ['google-chrome.desktop', 'com.google.Chrome.desktop', 'google-chrome-beta.desktop'], ['google-chrome', 'web-browser-symbolic']],
+            ['Brave', _('Brave'), ['brave-browser.desktop', 'com.brave.Browser.desktop', 'brave_brave.desktop'], ['brave-browser', 'web-browser-symbolic']],
+            ['Spotify', _('Spotify'), ['spotify.desktop', 'com.spotify.Client.desktop', 'spotify_spotify.desktop'], ['spotify-client', 'spotify', 'audio-x-generic-symbolic']],
+            ['Steam', _('Steam'), ['steam.desktop', 'com.valvesoftware.Steam.desktop', 'steam_steam.desktop'], ['steam', 'applications-games-symbolic']],
+            ['LocalSend', _('LocalSend'), ['org.localsend.localsend_app.desktop', 'localsend_app.desktop', 'localsend.desktop', 'localsend_localsend.desktop'], ['localsend', 'send-to-symbolic']],
+            ['Bitwarden', _('Bitwarden'), ['bitwarden.desktop', 'com.bitwarden.desktop.desktop', 'bitwarden_bitwarden.desktop'], ['bitwarden', 'dialog-password-symbolic']],
+            ['Android Studio', _('Android Studio'), ['android-studio.desktop', 'jetbrains-studio.desktop', 'com.google.AndroidStudio.desktop', 'android-studio_android-studio.desktop'], ['android-studio', 'applications-development-symbolic']],
+            ['Calculator', _('Calculator'), ['org.gnome.Calculator.desktop', 'gnome-calculator.desktop', 'galculator.desktop', 'mate-calc.desktop', 'qalculate-gtk.desktop', 'org.kde.kcalc.desktop'], ['accessories-calculator', 'accessories-calculator-symbolic']],
+            ['Driver Manager', _('Driver Manager'), ['mintdrivers.desktop', 'software-properties-drivers.desktop'], ['mintdrivers', 'jockey', 'cpu-symbolic', 'application-x-firmware-symbolic']],
+            ['Ulauncher', _('Ulauncher'), ['ulauncher.desktop', 'io.ulauncher.Ulauncher.desktop'], ['ulauncher', 'system-search-symbolic']],
+            ['ProtonVPN', _('Proton VPN'), ['proton.vpn.app.gtk.desktop', 'protonvpn-app.desktop', 'protonvpn.desktop', 'com.protonvpn.www.desktop'], ['proton-vpn-logo', 'protonvpn', 'network-vpn-symbolic']],
+            ['Emote', _('Emote'), ['emote.desktop', 'com.tomjwatson.Emote.desktop', 'emote_emote.desktop'], ['emote', 'face-smile-symbolic']],
+            ['LibreOffice', _('LibreOffice'), ['libreoffice-startcenter.desktop', 'org.libreoffice.LibreOffice.desktop', 'libreoffice_libreoffice.desktop'], ['libreoffice-startcenter', 'libreoffice-main', 'x-office-document-symbolic']],
+        ];
+        this._moreAppTiles = APPS.map(([id, title, ids, icon]) => this._addAppTile(id, title, ids, icon));
+        // Ulauncher runs in the background: tapping shows its search box (like its hotkey).
+        let ul = this._moreAppTiles.find(t => t.id === 'Ulauncher');
+        if (ul) ul._onClicked = () => {
+            if (this._previewing) this._pausePreview(); else this.menu.close();
+            if (hasProgram('ulauncher-toggle')) this._queue('ulauncher', 250, () => launch(['ulauncher-toggle']));
+            else this._openApp(this._findApp(ul._appIds));
+        };
+
+        // Startup Applications: Cinnamon's list of apps that start when you log in.
+        this._startupTile = this._addToggle({
+            id: 'Startup Applications', title: _('Startup Applications'),
+            icon: ['system-run-symbolic', 'cinnamon-settings-startup', 'preferences-system-session'],
+            onClicked: () => {
+                if (this._previewing) this._pausePreview(); else this.menu.close();
+                launch(['cinnamon-settings', 'startup']);
+            },
+        });
+
+        // Show desktop: minimize every window on this workspace; tap again to bring them back.
+        this._desktopTile = this._addToggle({
+            id: 'Show Desktop', title: _('Show Desktop'), icon: ['user-desktop-symbolic', 'desktop', 'user-desktop'],
+            onClicked: () => this._toggleShowDesktop(),
+        });
+
+        // Trash: open it; the arrow can empty it. Shows how many items it holds.
+        this._trashTile = this._addToggle({
+            id: 'Trash', title: _('Trash'), icon: ['user-trash-symbolic', 'user-trash'], menu: true,
+            onClicked: () => this._openUri('trash:///'),
+            onMenuOpen: () => this._buildTrashMenu(),
+        });
+
+        // Accessibility: Cinnamon's Accessibility settings (zoom, screen reader, high contrast…).
+        this._a11yTile = this._addToggle({
+            id: 'Accessibility', title: _('Accessibility'),
+            icon: ['preferences-desktop-accessibility-symbolic', 'org.gnome.Settings-accessibility-symbolic', 'preferences-desktop-accessibility'],
+            onClicked: () => {
+                if (this._previewing) this._pausePreview(); else this.menu.close();
+                launch(['cinnamon-settings', 'universal-access']);
+            },
+        });
 
         // Terminal tile: opens your default terminal.
         this._terminalCmd = this._findTerminal();
@@ -2438,7 +2639,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
 
         /* keyboard brightness slider lives inside its submenu */
         this._kbdSlider = this._sliderRow(['keyboard-brightness-symbolic', 'input-keyboard-symbolic'], null,
-            v => this._kbdThrottle && this._kbdThrottle.set(Math.round(v * (this._kbdMax || 100))));
+            v => { this._kbdUserTouched = true; if (this._kbdThrottle) this._kbdThrottle.set(Math.round(v * (this._kbdMax || 100))); });
         this._kbdToggle.menu.addActor(this._kbdSlider.row);
         this._kbdToggle.menu.setFooter([
             { label: _('Keyboard Settings'), onActivate: () => this._launch(['cinnamon-settings', 'keyboard']) },
@@ -2485,9 +2686,11 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
 
     // Re-check installs, and fill in the subtitles (updates waiting, NVIDIA GPU mode).
     _refreshAppTiles() {
-        for (let t of [this._updateTile, this._nvidiaTile, this._discordTile]) {
+        for (let t of [this._updateTile, this._nvidiaTile, this._discordTile].concat(this._moreAppTiles || [])) {
             if (t) t.setAvailable(!!this._findApp(t._appIds));
         }
+        this._syncTrash();
+        this._syncShowDesktop();
         // NVIDIA: which GPU mode PRIME is set to (instant, no password).
         if (this._nvidiaTile && this._nvidiaTile.available && hasProgram('prime-select')) {
             run(['prime-select', 'query'], (ok, out) => {
@@ -2509,6 +2712,85 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
                 this._updateTile.setChecked(n > 0);
             });
         }
+    }
+
+    _openUri(uri) {
+        if (this._previewing) this._pausePreview(); else this.menu.close();
+        try { Gio.AppInfo.launch_default_for_uri(uri, global.create_app_launch_context(0, -1)); }
+        catch (e) { launch(['xdg-open', uri]); }
+    }
+
+    /* ----- Show desktop ----- */
+    _desktopWindows() {
+        let ws = null;
+        try { ws = global.workspace_manager ? global.workspace_manager.get_active_workspace() : global.screen.get_active_workspace(); } catch (e) { }
+        return this._allWindows().filter(w => {
+            try {
+                if (w.skip_taskbar || w.get_window_type() !== 0 /* Meta.WindowType.NORMAL */) return false;
+                return !ws || w.located_on_workspace(ws);
+            } catch (e) { return false; }
+        });
+    }
+
+    _toggleShowDesktop() {
+        this.menu.close();
+        let open = this._desktopWindows().filter(w => !w.minimized);
+        if (open.length) {
+            this._desktopHidden = open;            // remember them to bring back
+            for (let w of open) try { w.minimize(); } catch (e) { }
+        } else if (this._desktopHidden && this._desktopHidden.length) {
+            for (let w of this._desktopHidden) try { w.unminimize(); } catch (e) { }
+            let last = this._desktopHidden[this._desktopHidden.length - 1];
+            this._desktopHidden = null;
+            if (last) this._focusWindow(last);
+        }
+        this._queue('desktop-sync', 300, () => this._syncShowDesktop());
+    }
+
+    _syncShowDesktop() {
+        if (!this._desktopTile) return;
+        let showing = !!(this._desktopHidden && this._desktopHidden.length) && !this._desktopWindows().some(w => !w.minimized);
+        if (!showing && this._desktopHidden && this._desktopWindows().some(w => !w.minimized)) this._desktopHidden = null;
+        this._desktopTile.setChecked(showing);
+        this._desktopTile.setSubtitle(showing ? _('Tap to restore') : '');
+    }
+
+    /* ----- Trash ----- */
+    _syncTrash(cb) {
+        if (!this._trashTile) return;
+        let f = Gio.File.new_for_uri('trash:///');
+        f.query_info_async('trash::item-count', Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_LOW, null, (o, r) => {
+            let n = 0;
+            try { n = o.query_info_finish(r).get_attribute_uint32('trash::item-count'); } catch (e) { n = 0; }
+            this._trashCount = n;
+            this._trashTile.setSubtitle(n ? (n === 1 ? _('1 item') : `${n} ${_('items')}`) : _('Empty'));
+            this._trashTile.setIcon(n ? ['user-trash-full-symbolic', 'user-trash-full', 'user-trash-symbolic'] : ['user-trash-symbolic', 'user-trash']);
+            if (cb) cb(n);
+        });
+    }
+
+    _buildTrashMenu() {
+        let menu = this._trashTile.menu;
+        menu.clear();
+        menu.addItem({ label: _('Open Trash'), icon: ['folder-open-symbolic'], onActivate: () => this._openUri('trash:///') });
+        menu.addItem({
+            label: _('Empty Trash…'), icon: ['user-trash-full-symbolic', 'edit-delete-symbolic'],
+            onActivate: () => this._confirmEmptyTrash(),
+        });
+        this._syncTrash();
+    }
+
+    _confirmEmptyTrash() {
+        let n = this._trashCount || 0;
+        if (!n) { this._syncTrash(); return; }
+        this._showDialog(_('Empty the Trash?'),
+            _('%d items will be deleted for good. This can\'t be undone.').replace('%d', String(n)),
+            [
+                { label: _('Cancel'), key: Clutter.KEY_Escape, action: () => { } },
+                { label: _('Empty Trash'), default: true, action: () => {
+                    run(['gio', 'trash', '--empty'], () => this._queue('trash-sync', 300, () => this._syncTrash()));
+                } },
+            ], null, () => { });
     }
 
     // The terminal chosen in System Settings › Preferred Applications, else a common one.
@@ -2860,7 +3142,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     // Tiles per page: columns x rows (4 rows by default, like Android).
     _pageCapacity() {
         let rowsPerPage = Math.max(1, Math.min(8, parseInt(this.cfg('rows-per-page')) || 4));
-        return (this._columns || 2) * rowsPerPage;
+        return this._tileCols() * rowsPerPage;
     }
 
     _visibleTiles(rows) {
@@ -2928,7 +3210,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     _relayout(rowsOverride) {
         let rows = rowsOverride || (this._editing && this._editDraft ? this._editDraft : this._layoutRows());
         this._curRows = rows;
-        let cols = this._columns || 2;
+        let cols = this._tileCols();
         let editing = !!this._editing;
         let compact = this._isCompact();
 
@@ -3027,7 +3309,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     _trayFlip(step) {
         let rows = this._editDraft || this._curRows || this._layoutRows();
         let hidden = rows.filter(r => !r.show).map(r => this._toggleById[r.item]).filter(t => t && t.shown);
-        let pages = Math.max(1, Math.ceil(hidden.length / ((this._columns || 2) * 4)));
+        let pages = Math.max(1, Math.ceil(hidden.length / (this._tileCols() * 4)));
         let next = Math.max(1, Math.min(pages, (this._trayPage || 1) + step));
         if (next === this._trayPage) return;
         this._trayPage = next;
@@ -3112,6 +3394,32 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     }
 
     // Round buttons are 48px with 8px gaps: 6 at GNOME's width, more when the menu is wider.
+    // Tiles per row for the chosen tile style.
+    _tileCols() {
+        let style = this._tileStyleName || 'long';
+        if (style === 'round') {
+            // Round buttons are 52px with 8px gaps: fit as many as the card is wide, never more.
+            let w = (this._contentWidth || 376);
+            return Math.max(4, Math.floor((w + 8) / 60));
+        }
+        if (style === 'small') return this._columns || 2;   // one small tile per column, as chosen
+        return this._columns || 2;
+    }
+
+    _applyTileStyle() {
+        let style = this.cfg('tile-style');
+        if (!['long', 'round', 'small'].includes(style)) style = 'long';
+        this._tileStyleName = style;
+        for (let x of ['long', 'round', 'small']) {
+            if (x === style) this._main.add_style_class_name('gqs-tiles-' + x);
+            else this._main.remove_style_class_name('gqs-tiles-' + x);
+        }
+        let showLabels = this.cfg('tile-labels') !== false;
+        if (showLabels) this._main.remove_style_class_name('gqs-tiles-nolabels');
+        else this._main.add_style_class_name('gqs-tiles-nolabels');
+        for (let t of this._toggles) t.setTileStyle(style, showLabels);
+    }
+
     _compactCount() {
         let w = this._contentWidth || 376;
         return Math.max(COMPACT_TILES, Math.floor((w + 8) / 56));
@@ -3918,6 +4226,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     //   3. cinnamon-settings-daemon's keyboard interface
     _initKeyboard() {
         this._kbdThrottle = new Throttled((v, done) => this._kbdSet(v, done));
+        this._watchResumeForBt();   // shared "woke from suspend" signal
         this._kbdTryUPower(() => this._kbdTrySysfs(() => this._kbdTryLegionRgb(() => {
             this._kbdBackend = 'csd';
             this._kbdMax = 100;
@@ -3935,6 +4244,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
                 if (!(max > 0)) { fallback(); return; }
                 this._kbdBackend = 'upower';
                 this._kbdMax = max;
+                this._kbdLoginPolicy();
                 this._kbdSub = Gio.DBus.system.signal_subscribe('org.freedesktop.UPower',
                     'org.freedesktop.UPower.KbdBacklight', null, '/org/freedesktop/UPower/KbdBacklight', null,
                     Gio.DBusSignalFlags.NONE, (conn, sender, path, iface, signal, params) => {
@@ -3964,6 +4274,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
         this._kbdLed = led;
         this._kbdMax = max;
         this._getKeyboard();
+        this._kbdLoginPolicy();
     }
 
     _kbdCsdInit() {
@@ -3973,6 +4284,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
             this._kbdPending = false;
             if (error) { this._kbdUnsupported('cinnamon-settings-daemon not available'); return; }
             this._kbdProxy = proxy;
+            this._kbdLoginPolicy();
             this._kbdSig1 = proxy.connectSignal('Changed', () => this._getKeyboard());
             this._kbdSig2 = proxy.connectSignal('BrightnessChanged', () => this._getKeyboard());
             this._getKeyboard();
@@ -4042,8 +4354,8 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
                 this._kbdMax = 2;
                 global.log('[gqs] keyboard backlight: Legion 4-zone RGB controller');
                 let st = this._rgbState();
-                if (st.userSet) this._rgbSend(st);   // restore your lighting after login
                 this._kbdApply(st.brightness);
+                this._kbdLoginPolicy();             // restore your lighting (or keep it off) after login
                 this._startRgbWatch();
             } else if (r === 'noperm') {
                 this._kbdBackend = 'rgb-setup';
@@ -4141,6 +4453,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     }
 
     _rgbSet(changes, cb) {
+        this._kbdUserTouched = true;
         let st = Object.assign(this._rgbState(), changes, { userSet: true });
         if (st.brightness > 0) st.lastOn = st.brightness;
         try { this.settings.setValue('kbd-rgb-state', st); } catch (e) { }
@@ -4206,6 +4519,47 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
         }
     }
 
+    /* Keyboard light at login (and after waking from suspend). Many laptops switch the
+       backlight on at every power-up, whatever it was before. Choices:
+         remember: put back the state you left it in;  off: always start with it off;
+         system: leave it to the laptop. Applied a few times over the first 30 s because some
+       keyboards (USB controllers like Legion's) only settle after login. */
+    _kbdLoginPolicy(resume) {
+        let mode = this.cfg('kbd-at-login');
+        if (mode === 'system' || !this._kbdBackend || this._kbdBackend === 'rgb-setup') { this._kbdPolicyDone = true; return; }
+        this._kbdUserTouched = false;
+        let apply = () => {
+            if (this._kbdUserTouched) return;   // you changed it yourself meanwhile: leave it
+            let b = this._kbdBackend;
+            if (b === 'rgb') {
+                let st = this._rgbState();
+                if (mode === 'off') {
+                    if (st.brightness !== 0) {
+                        st = Object.assign(st, { brightness: 0 });
+                        try { this.settings.setValue('kbd-rgb-state', st); } catch (e) { }
+                    }
+                    this._rgbSend(st, () => this._kbdApply(0));
+                } else if (st.userSet || st.brightness === 0) {
+                    this._rgbSend(st, () => this._kbdApply(st.brightness));
+                }
+                return;
+            }
+            let want = mode === 'off' ? 0 : this.cfg('kbd-last-level');
+            if (typeof want !== 'number') return;        // nothing remembered yet
+            want = Math.max(0, Math.min(this._kbdMax || 100, want));
+            if (this._kbdValue !== want && this._kbdThrottle) this._kbdThrottle.set(want);
+        };
+        this._kbdPolicyDone = false;
+        let delays = resume ? [2000, 8000] : [0, 6000, 20000];
+        delays.forEach((ms, i) => {
+            this._queue('kbd-policy-' + i, ms + 1, () => {
+                apply();
+                if (i === delays.length - 1) this._queue('kbd-policy-done', 3000, () => { this._kbdPolicyDone = true; });
+            });
+        });
+        if (mode === 'off') global.log('[gqs] keyboard light at login: keeping it off');
+    }
+
     // Shown (not hidden) when no keyboard light can be controlled, so it's clear why.
     _kbdUnsupported(reason) {
         if (this._kbdSupported) return;
@@ -4231,6 +4585,11 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
 
     _kbdApply(v) {
         this._kbdSupported = true;
+        // After the login window: remember the level (yours, or set with the keyboard's Fn keys
+        // where the keyboard reports it) for the next login.
+        if (this._kbdPolicyDone && this.settings && this._kbdBackend !== 'rgb' && this.cfg('kbd-last-level') !== v) {
+            try { this.settings.setValue('kbd-last-level', v); } catch (e) { }
+        }
         let max = this._kbdMax || 100;
         this._kbdValue = v;
         if (v > 0) this._kbdLast = v;
@@ -4265,7 +4624,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
                     label: this._kbdLevelName(lvl),
                     icon: lvl === 0 ? ['keyboard-brightness-off-symbolic', 'input-keyboard-symbolic'] : ['keyboard-brightness-symbolic', 'input-keyboard-symbolic'],
                     checked: lvl === this._kbdValue,
-                    onActivate: () => this._kbdThrottle.set(lvl),
+                    onActivate: () => { this._kbdUserTouched = true; this._kbdThrottle.set(lvl); },
                 });
             }
         } else {
@@ -4274,6 +4633,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
     }
 
     _toggleKeyboard() {
+        this._kbdUserTouched = true;
         if (this._kbdBackend === 'rgb-setup') {
             this.menu.close();
             this._notify(_('Keyboard lighting needs a one-time setup'),
@@ -4926,6 +5286,7 @@ class GnomeQuickSettingsApplet extends Applet.Applet {
                 (conn, sender, path, iface, signal, params) => {
                     let [sleeping] = params.deep_unpack();
                     if (sleeping) return;
+                    this._kbdLoginPolicy(true);   // keyboards often light up again after waking
                     if (this.cfg('bt-at-login') !== 'system') {
                         this._btLoginStart = undefined;
                         this._queue('bt-resume', 3000, () => this._btRefresh());

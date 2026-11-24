@@ -106,7 +106,7 @@
 
 .gqs-toggle-main {
     min-height: 48px;
-    padding: 0 12px 0 16px;
+    padding: 6px 12px 6px 16px;
     border-radius: 999px;
     background-color: #46464b;
     color: #ffffff;
@@ -400,7 +400,7 @@
 }
 
 /* ---------- 4 and 5 columns: slightly tighter toggles ---------- */
-.gqs-main.gqs-compact .gqs-toggle-main { padding: 0 8px 0 14px; }
+.gqs-main.gqs-compact .gqs-toggle-main { padding: 6px 8px 6px 14px; }
 .gqs-main.gqs-compact .gqs-toggle.has-menu .gqs-toggle-main { padding-right: 4px; }
 .gqs-main.gqs-compact .gqs-toggle-arrow { width: 32px; }
 .gqs-main.gqs-compact .gqs-toggle-content { spacing: 8px; }
@@ -730,3 +730,107 @@
 .gqs-light .gqs-tray-nav-btn { color: #202020; background-color: rgba(0, 0, 0, 0.06); }
 .gqs-light .gqs-tray-nav-btn:hover { background-color: rgba(0, 0, 0, 0.12); }
 .gqs-light .gqs-tray-page { color: rgba(0, 0, 0, 0.6); }
+
+/* ---------- button shape (Appearance › Button shape) ----------
+   pill (GNOME default): pill tiles, round buttons — the rules above.
+   square: small corners.  squircle: soft rounded squares.  teardrop: one tight corner (Android). */
+.gqs-shape-square .gqs-toggle-main { border-radius: 6px; }
+.gqs-shape-square .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 6px 0 0 6px; }
+.gqs-shape-square .gqs-toggle-arrow { border-radius: 0 6px 6px 0; }
+.gqs-shape-square .gqs-icon-button,
+.gqs-shape-square .gqs-round-tile,
+.gqs-shape-square .gqs-submenu-header-icon,
+.gqs-shape-square .gqs-edit-tool,
+.gqs-shape-square .gqs-pill { border-radius: 6px; }
+
+.gqs-shape-squircle .gqs-toggle-main { border-radius: 16px; }
+.gqs-shape-squircle .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 16px 0 0 16px; }
+.gqs-shape-squircle .gqs-toggle-arrow { border-radius: 0 16px 16px 0; }
+.gqs-shape-squircle .gqs-icon-button,
+.gqs-shape-squircle .gqs-submenu-header-icon,
+.gqs-shape-squircle .gqs-edit-tool,
+.gqs-shape-squircle .gqs-pill { border-radius: 13px; }
+.gqs-shape-squircle .gqs-round-tile { border-radius: 16px; }
+
+.gqs-shape-teardrop .gqs-toggle-main { border-radius: 999px 999px 8px 999px; }
+.gqs-shape-teardrop .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 999px 0 0 999px; }
+.gqs-shape-teardrop .gqs-toggle-arrow { border-radius: 0 999px 8px 0; }
+.gqs-shape-teardrop .gqs-icon-button,
+.gqs-shape-teardrop .gqs-round-tile,
+.gqs-shape-teardrop .gqs-submenu-header-icon,
+.gqs-shape-teardrop .gqs-edit-tool,
+.gqs-shape-teardrop .gqs-pill { border-radius: 999px 999px 6px 999px; }
+
+/* rhombus: a slanted diamond look (two opposite corners rounder, two tighter). True diamonds
+   aren't possible here: St can only round corners, not cut or rotate a button's shape. */
+.gqs-shape-rhombus .gqs-toggle-main { border-radius: 18px 6px 18px 6px; }
+.gqs-shape-rhombus .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 18px 0 0 6px; }
+.gqs-shape-rhombus .gqs-toggle-arrow { border-radius: 0 6px 18px 0; }
+.gqs-shape-rhombus .gqs-icon-button,
+.gqs-shape-rhombus .gqs-round-tile,
+.gqs-shape-rhombus .gqs-submenu-header-icon,
+.gqs-shape-rhombus .gqs-edit-tool,
+.gqs-shape-rhombus .gqs-pill { border-radius: 15px 5px 15px 5px; }
+
+/* window: softly arched on top, squarer at the bottom */
+.gqs-shape-window .gqs-toggle-main { border-radius: 18px 18px 6px 6px; }
+.gqs-shape-window .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 18px 0 0 6px; }
+.gqs-shape-window .gqs-toggle-arrow { border-radius: 0 18px 6px 0; }
+.gqs-shape-window .gqs-icon-button,
+.gqs-shape-window .gqs-round-tile,
+.gqs-shape-window .gqs-submenu-header-icon,
+.gqs-shape-window .gqs-edit-tool,
+.gqs-shape-window .gqs-pill { border-radius: 15px 15px 5px 5px; }
+
+/* ---------- tile style (Appearance › Tile style) ---------- */
+/* round buttons: icon only, like the compact row */
+.gqs-tiles-round .gqs-grid-row { spacing: 8px; }
+.gqs-tiles-round .gqs-toggle { min-height: 52px; }
+.gqs-tiles-round .gqs-toggle-main,
+.gqs-main.gqs-compact.gqs-tiles-round .gqs-toggle-main,
+.gqs-main.gqs-compact.gqs-tiles-round .gqs-toggle.has-menu .gqs-toggle-main { width: 52px; height: 52px; min-height: 52px; min-width: 52px; max-width: 52px; padding: 0; }
+.gqs-tiles-round .gqs-toggle-content { spacing: 0; }
+.gqs-tiles-round .gqs-tile-filler { min-height: 52px; height: 52px; }
+/* small tiles: icon above a short name */
+.gqs-tiles-small .gqs-grid-row { spacing: 8px; }
+.gqs-tiles-small .gqs-toggle { min-height: 76px; }
+.gqs-tiles-small .gqs-toggle-main,
+.gqs-main.gqs-compact.gqs-tiles-small .gqs-toggle-main,
+.gqs-main.gqs-compact.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { min-height: 76px; padding: 8px 6px; }
+.gqs-tiles-small .gqs-toggle-content { spacing: 6px; }
+.gqs-tiles-small .gqs-toggle-title { font-size: 9pt; font-weight: normal; }
+.gqs-tiles-small .gqs-tile-filler { min-height: 76px; height: 76px; }
+/* small tiles are nearly square: "fully round" shapes use a large soft radius instead of an oval */
+.gqs-main.gqs-shape-pill.gqs-tiles-small .gqs-toggle-main { border-radius: 24px; }
+.gqs-main.gqs-shape-teardrop.gqs-tiles-small .gqs-toggle-main { border-radius: 24px 24px 8px 24px; }
+/* small tiles: name centred under the icon, line by line */
+.gqs-tiles-small .gqs-toggle-title,
+.gqs-toggle-title.gqs-centered { text-align: center; }
+
+/* arrows in round and small tile styles */
+.gqs-main.gqs-tiles-small .gqs-toggle-arrow { width: 26px; min-width: 26px; padding: 0; }
+.gqs-main.gqs-tiles-round .gqs-toggle { spacing: 2px; }
+.gqs-main.gqs-tiles-round .gqs-toggle-arrow,
+.gqs-main.gqs-tiles-round .gqs-toggle.checked .gqs-toggle-arrow {
+    width: 40px; min-width: 40px; height: 16px; min-height: 16px; padding: 0;
+    border-radius: 999px; background-color: transparent;
+}
+.gqs-main.gqs-tiles-round .gqs-toggle-arrow:hover { background-color: rgba(255, 255, 255, 0.1); }
+.gqs-main.gqs-light.gqs-tiles-round .gqs-toggle-arrow:hover { background-color: rgba(0, 0, 0, 0.08); }
+.gqs-main.gqs-light.gqs-tiles-round .gqs-toggle-arrow { color: #202020; }
+
+/* big tiles (tile-style "small") are tall: fully round corners would bulge the split arrow
+   into a half-moon. Use corners that suit a tall tile, matching each shape. */
+.gqs-main.gqs-shape-pill.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 24px 0 0 24px; }
+.gqs-main.gqs-shape-pill.gqs-tiles-small .gqs-toggle-arrow { border-radius: 0 24px 24px 0; }
+.gqs-main.gqs-shape-teardrop.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 24px 0 0 24px; }
+.gqs-main.gqs-shape-teardrop.gqs-tiles-small .gqs-toggle-arrow { border-radius: 0 24px 8px 0; }
+.gqs-main.gqs-shape-rhombus.gqs-tiles-small .gqs-toggle-main { border-radius: 22px 6px 22px 6px; }
+.gqs-main.gqs-shape-rhombus.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 22px 0 0 6px; }
+.gqs-main.gqs-shape-rhombus.gqs-tiles-small .gqs-toggle-arrow { border-radius: 0 6px 22px 0; }
+.gqs-main.gqs-shape-window.gqs-tiles-small .gqs-toggle-main { border-radius: 22px 22px 6px 6px; }
+.gqs-main.gqs-shape-window.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 22px 0 0 6px; }
+.gqs-main.gqs-shape-window.gqs-tiles-small .gqs-toggle-arrow { border-radius: 0 22px 6px 0; }
+.gqs-main.gqs-shape-squircle.gqs-tiles-small .gqs-toggle-main { border-radius: 20px; }
+.gqs-main.gqs-shape-squircle.gqs-tiles-small .gqs-toggle.has-menu .gqs-toggle-main { border-radius: 20px 0 0 20px; }
+.gqs-main.gqs-shape-squircle.gqs-tiles-small .gqs-toggle-arrow { border-radius: 0 20px 20px 0; }
